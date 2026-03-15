@@ -1,0 +1,120 @@
+#!/bin/bash
+# windoze-image-backup 1.1 2025-12-21
+
+function fatal() { echo "ERRO: $1"; exit 1; }
+
+function select_disk() {
+    local options=()
+    local disco=""
+    local desc=""
+    
+    while read -r linha; do
+        disco=$(echo "$linha" | awk '{print $1}')
+        desc=$(echo "$linha" | cut -d' ' -f2-)
+        options+=("$disco" "$desc")
+    done < <(lsblk -d -p -n -o NAME,SIZE,MODEL | grep -E '^/dev/(sd|nvme|vd|mmcblk)')
+
+    [[ ${#options[@]} -eq 0 ]] && fatal "Nenhum disco encontrado." >&2
+
+    escolhido=$(whiptail --title "Seleção de Disco" \
+                    --menu "Escolha o disco de origem" \
+                    15 60 4 \
+                    "${options[@]}" \
+                    3>&1 1>&2 2>&3)
+    [[ $? -ne 0 ]] && fatal "Operação cancelada pelo utilizador." >&2
+    echo "$escolhido"
+}
+
+function select_part_ext4() {
+    local disco="$1"
+    [[ -z "$disco" || ! -b "$disco" ]] && fatal "O disco '$disco' não é válido ou não existe." >&2 
+    echo "A procurar partições ext4 em $disco..." >&2
+    local particoes
+    particoes=($(lsblk -ln -o NAME,FSTYPE "$disco" | awk '$2 == "ext4" {print "/dev/"$1}'))
+    [[ ${#particoes[@]} -eq 0 ]] && fatal "Nenhuma partição ext4 encontrada em $disco." >&2
+    echo "---------------------------------------------" >&2
+    PS3="Escolha a partição a salvar:" >&2
+    select part in "${particoes[@]}"; do
+        if [[ -n "$part" ]]; then
+            echo "$part"
+            break
+        else
+            echo "Opção inválida. Tente novamente." >&2
+        fi
+    done
+}
+
+function get_filename() {
+    local prompt="$1"
+    local titulo="$2"
+    local ficheiro
+
+    while true; do
+        ficheiro=$(whiptail --title "$titulo" --inputbox "$prompt" 10 60 3>&1 1>&2 2>&3)
+        [[ $? -ne 0 ]] && return 1
+        if [[ -z "$ficheiro" ]]; then
+            whiptail --title "Erro" --msgbox "O campo não pode estar vazio." 8 40
+            continue
+        fi
+        echo "${ficheiro// /_}"
+        break
+    done
+}
+
+# Limpa os ficheiros desnecessários dos utilizadores
+cleanup_homes() {
+    local users="master aluno professor"
+    local options="apt.* bash.* chromium.* firefox.* gimp.* google_chrome.* java"
+    options+=" libreoffice.* system.tmp system.trash system.cache"
+    options+=" thumbnails.* vlc.* wine.* x11.*"
+    for U in $users; do
+# Verifica se o user existe antes de tentar limpar
+        if id "$U" &>/dev/null; then
+            echo "A limpar home do utilizador: $U..."
+            su - "$U" -c "bleachbit --clean $options" 2>/dev/null | grep "Disk space recovered" || echo "Nada a limpar ou erro."
+        else
+            echo "Utilizador $U não existe, a saltar."
+        fi
+    done
+    echo "Limpeza concluída."
+}
+
+
+# ==== MAIN
+[[ $EUID -ne 0 ]] && fatal "São necessárias permissões de root."
+export DEBIAN_FRONTEND=noninteractive
+apt update -y > /dev/null 2>&1
+apt install -y bleachbit fsarchiver whiptail > /dev/null 2>&1
+DISK=$(select_disk)
+[[ ! -b "$DISK" ]] && fatal "Disco inválido $DISK"
+PART=$(select_part_ext4 "$DISK")
+[[ ! -b "$PART" ]] && fatal "Partição inválida $PART"
+FILENAME=$(get_filename "Nome do ficheiro (sem extensão):" "Backup")
+[[ -z "$FILENAME" ]] && fatal "Nome inválido."
+MNT="/media/data"
+FILENAME="$MNT/images/$FILENAME"
+if [[ "$FILENAME" != *.fsa ]]; then
+    FILENAME="${FILENAME}.fsa"
+fi
+
+! mountpoint -q "$MNT" && fatal "O disco de destino não parece estar montado em $MNT."
+IMAGE_DIR=$(dirname "$FILENAME")
+[[ ! -d "$IMAGE_DIR" ]] && mkdir -p "$IMAGE_DIR"
+[[ ! -w "$IMAGE_DIR" ]] && fatal "Não consigo escrever em $IMAGE_DIR"
+EXCLUDE="--exclude=/tmp/* --exclude=/var/tmp/* --exclude=/var/cache/apt/archives/*"
+cleanup_homes
+fsarchiver savefs "$FILENAME" "$PART" -j$(nproc) -Z 12 $EXCLUDE > /tmp/backup.log 2>&1 &
+PID=$!
+while kill -0 $PID 2> /dev/null; do
+    TAMANHO=$(du -h "$FILENAME" 2>/dev/null | cut -f1)
+    TAMANHO=${TAMANHO:-0}
+    echo -ne "Tamanho do Backup: $TAMANHO \r"
+    sleep 2
+done
+wait $PID
+EXIT_CODE=$?
+echo ""
+[[ $EXIT_CODE -ne 0 ]] && fatal "O backup falhou"
+echo "Backup guardado em $FILENAME"
+ls -lh $(dirname "$FILENAME")
+

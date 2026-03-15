@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# user-menu v1.07 - 2025-12-12
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+getroot "$@"
+
+TITLE="Gestão de utilizadores"
+MENU="Escolha a ação"
+MSG="Esta operação vai APAGAR todos os dados locais do utilizador\n
+e repor as definições originais.\n\n
+Continuar?"
+MANAGE="$AEVH_BIN/user-manage"
+
+while true; do
+    OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 10 \
+        1 "Reset do aluno"\
+        2 "Salvar o perfil do aluno"\
+		3 "Reset do professor"\
+        4 "Salvar o perfil do professor"\
+        0 "Sair" \
+    3>&1 1>&2 2>&3)
+    RET=$?
+    [[ $RET -ne 0 || "$OPT" == "0" ]] && { clear; exit 0; }
+    case $OPT in
+        1)  if confirm "$MSG" "Atenção"; then
+                "$MANAGE" reset aluno 
+	        	usermod -c "Aluno" aluno
+	    	else
+	        	warn "Operação cancelada pelo utilizador"
+	    	fi
+		;;
+		2)  "$MANAGE" save aluno ;;
+        3)  if confirm "$MSG" "Atenção"; then
+                "$MANAGE" reset professor 
+	    	    usermod -c "Professor" professor
+	    	else
+	        	warn "Operação cancelada pelo utilizador"
+	    	fi
+		;;
+        4) "$MANAGE" save professor  ;;
+    esac
+    echo ""
+    keywait
+done

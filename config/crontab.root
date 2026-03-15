@@ -1,0 +1,46 @@
+# Edit this file to introduce tasks to be run by cron.
+# 
+# Each task to run has to be defined through a single line
+# indicating with different fields when the task will be run
+# and what command to run for the task
+# 
+# To define the time you can provide concrete values for
+# minute (m), hour (h), day of month (dom), month (mon),
+# and day of week (dow) or use '*' in these fields (for 'any').
+# 
+# Notice that tasks will be started based on the cron's system
+# daemon's notion of time and timezones.
+# 
+# Output of the crontab jobs (including errors) is sent through
+# email to the user the crontab file belongs to (unless redirected).
+# 
+# For example, you can run a backup of all your user accounts
+# at 5 a.m every week with:
+# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/
+# 
+# For more information see the manual pages of crontab(5) and cron(8)
+# 
+# m h  dom mon dow   command
+
+# verifica o proxy ao minuto 17 das horas pares
+17 */2 * * * /opt/aevh/bin/auto-apt-proxy
+
+# desligar às 17:45
+29 17 * * * /opt/aevh/bin/shutdown-spread
+
+# tentar desligar às 19:00 e volta a tentar às 00:00
+59 18,23 * * * /opt/aevh/bin/shutdown-spread
+
+# a cada minuto verifica se é preciso avisar o utilizador
+* * * * * /opt/aevh/bin/shutdown-notify
+
+# sábados e domingos às 9:15
+15 09 * * 6,7 /opt/aevh/bin/shutdown-spread 5
+# feriados às 9:16
+16 09  1 1,5,11,12 * /opt/aevh/bin/shutdown-spread 5
+16 09 25      4,12 * /opt/aevh/bin/shutdown-spread 5
+16 09  5        10 * /opt/aevh/bin/shutdown-spread 5
+16 09  8	12 * /opt/aevh/bin/shutdown-spread 5
+16 09 10	 6 * /opt/aevh/bin/shutdown-spread 5
+# agosto a cada 4 horas
+00 */4 * 8 * /opt/aevh/bin/shutdown-spread 5

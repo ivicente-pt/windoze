@@ -1,0 +1,17 @@
+Unattended-Upgrade::Origins-Pattern {
+    // Atualizações de segurança:
+    "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+    "origin=Debian,codename=${distro_codename},label=Debian-Security";
+
+    // Atualizações de estabilidade ("point releases", ex: 12.1 para 12.2):
+    "origin=Debian,codename=${distro_codename},label=Debian";
+
+    // Atualizações recomendadas (correções de bugs que não são de segurança):
+    "origin=Debian,codename=${distro_codename}-updates,label=Debian";
+};
+
+Unattended-Upgrade::Package-Blacklist {
+};
+
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::InstallOnShutdown "true";

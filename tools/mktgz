@@ -1,0 +1,12 @@
+#!/bin/bash
+# v 1.1-2 2025-11-23
+zip="-z"
+
+if command -v pigz &> /dev/null; then
+    zip="--use-compress-program=pigz -9 --rsyncable"
+    echo "Usando pigz para compressão paralela."
+else
+    echo "pigz não encontrado. Usando gzip para compressão."
+fi
+
+tar "${zip}" -cvf aevh.tgz aevh/

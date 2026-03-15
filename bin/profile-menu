@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# profile-menu v1.04 - 2025-12-14
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+
+# --- Definição de Pacotes ---
+PKG_EB1=( tuxmath tuxpaint gcompris-qt openboard )
+PKG_EB23S=( openboard )
+PKG_SALATIC=( audacity gimp dia stellarium kicad gelemental arduino freecad kolourpaint )
+
+# --- Funções Auxiliares ---
+
+common() {
+    clear
+    "$AEVH_BIN"/set-hostname
+    
+    speak "A atualizar o sistema."
+    info_exec "A atualizar repositórios e sistema..." \
+        apt_update && apt_upgrade
+}
+
+op_user() {
+    # $1 = op (del, asdd, reset, restore, clean_on, clean_off)
+    # $2 = user (aluno, professor, master)
+    local op="$1"
+    local user="$2"
+    "$AEVH_BIN/user-manage" "$op" "$user"
+}
+
+   
+# --- Perfis ---
+
+perfil_base() {
+    confirm "Aplicar Perfil Base? (Remove software específico)" || return 1
+    common
+    speak "A remover software educativo."
+    apt_purge "${PKG_EB1[@]}" "${PKG_EB23S[@]}" "${PKG_SALATIC[@]}"
+    op_user clean_off aluno
+    op_user del aluno
+    op_user del professor
+    speak "Perfil base aplicado."
+}
+
+perfil_sala_eb1 () {
+    confirm "Aplicar Perfil Sala de Aula EB1/JI?" || return 1
+    common
+    speak "A instalar software para primeiro ciclo e JI."
+    info_exec "A instalar pacotes EB1/JI..." apt_install "${PKG_EB1[@]}"
+    op_user clean_off aluno
+    op_user reset aluno
+    op_user reset professor
+    speak "Perfil EB1 concluído."
+}
+
+perfil_sala_eb23s () {
+    confirm "Aplicar Perfil Sala de Aula EB2/3/S?" || return 1
+    common
+    speak "A instalar software de sala de aula."
+    info_exec "A instalar pacotes genéricos..." apt_install "${PKG_EB23S[@]}"
+    op_user clean_off aluno
+    op_user reset aluno
+    op_user reset professor
+    speak "Perfil concluído."
+}
+
+perfil_sala_profs () {
+    confirm "Aplicar Perfil Sala de Professores?" || return 1
+    common
+    speak "A instalar software de impressão."
+    assert "Falha ao instalar YSoft" "$AEVH_BIN/windoze" install ysoft
+    op_user clean_off aluno
+    op_user del aluno
+    op_user reset professor
+    speak "Perfil de professores concluído."
+}
+
+perfil_sala_tic () {
+    confirm "Aplicar Perfil Sala TIC?" || return 1
+    common
+    speak "A instalar software técnico."
+    info_exec "A instalar ferramentas TIC..." apt_install "${PKG_SALATIC[@]}"
+    op_user clean_on aluno
+    op_user reset aluno
+    op_user del professor
+    speak "Perfil Sala TIC configurado."
+}
+
+perfil_biblioteca () {
+    confirm "Aplicar Perfil Biblioteca?" || return 1
+    common
+    speak "A instalar software completo da biblioteca."
+    # Instala tudo
+    info_exec "A instalar conjunto completo..." \
+        apt_install "${PKG_EB1[@]}" "${PKG_EB23S[@]}" "${PKG_SALATIC[@]}"
+    op_user clean_on aluno
+    op_user reset aluno
+    op_user del professor
+    speak "Biblioteca configurada."
+}
+
+# --- Main Loop ---
+getroot "$@"
+
+TITLE="Definir perfil da máquina"
+MENU="Escolher o perfil a aplicar nesta máquina:"
+
+while true; do
+    # O comando dialog mantém-se igual, é eficaz
+    OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 12 \
+        "1" "Perfil: Sala de aula EB1/JI" \
+        "2" "Perfil: Sala de aula EB23S" \
+        "3" "Perfil: Sala de professores/DTs" \
+        "4" "Perfil: Sala TIC (Alunos)" \
+        "5" "Perfil: Biblioteca (Alunos)" \
+        "6" "Perfil: BASE (remove software educativo)" \
+        "0" "Sair"\
+        3>&1 1>&2 2>&3)
+    
+    RET=$?
+    
+    # Se cancelou ou escolheu 0
+    [[ $RET -ne 0 || "$OPT" == "0" ]] && { 
+        clear; 
+        echo "A sair..."; 
+        exit 0; 
+    }
+    
+    case $OPT in
+        "1") perfil_sala_eb1 ;;
+        "2") perfil_sala_eb23s ;;
+        "3") perfil_sala_profs ;;
+        "4") perfil_sala_tic ;;
+        "5") perfil_biblioteca ;;
+        "6") perfil_base ;;
+    esac
+    
+    echo ""
+    info "Operação terminada. Pressione qualquer tecla para voltar ao menu."
+    read -r -n 1 -s
+done
+

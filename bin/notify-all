@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# notify-all v1.0 - 2026-01-01
+# Envia uma notificação a todos os utilizadores logados na interface gráfica
+
+# Lista todas as sessões. O grep filtra apenas sessões ativas com user
+loginctl list-sessions --no-legend | while read -r SESSION_ID USER_UID USER_NAME _SEAT; do
+    
+    SESSION_TYPE=$(loginctl show-session -p Type --value "$SESSION_ID")
+    
+    if [[ "$SESSION_TYPE" == "x11" ]] || [[ "$SESSION_TYPE" == "wayland" ]]; then
+        
+        DBUS_ADDRESS="unix:path=/run/user/${USER_UID}/bus"
+        DISPLAY_ID=$(loginctl show-session -p Display --value "$SESSION_ID")
+        DISPLAY_ID=${DISPLAY_ID:-:0}
+
+        if [[ -e "/run/user/${USER_UID}/bus" ]]; then
+             runuser -u "$USER_NAME" -- \
+                env DISPLAY="$DISPLAY_ID" \
+                    DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDRESS" \
+                    /usr/bin/notify-send "$@"
+        fi
+    fi
+done

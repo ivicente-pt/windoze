@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# monitor-ctrl v1.1.2 2025-12-06
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+# Funções auxiliares
+#  get_first_connected_monitor_id() - ID do monitor
+#  get_monitor_orientation() - Orientação do monitor
+# Funções principais
+#  cmd_help() - Mostra a ajuda
+#  cmd_id() - Mostra todos os monitores ligados
+#  cmd_orientation() - Devolve a orientação do monitor indicado
+#  cmd_rotate() - Roda o monitor
+#  cmd_mirror() - Coloca todos os monitoes em mirror, com a menor resolução suportada
+
+
+# Retorna o ID do monitor ou uma string vazia se nenhum for encontrado.
+get_first_connected_monitor_id() {
+    xrandr | grep " connected" | grep -v "disconnected" | awk '{print $1}' | head -n1
+}
+
+# Obter a orientação atual de um monitor. Parâmetros: $1 = monitor_id
+# Retorna a orientação (normal, right, inverted, left) ou string vazia.
+get_monitor_orientation() {
+    local monitor_id="$1"
+	# shellcheck disable=SC2155
+	local flag=$(xrandr | grep "^${monitor_id} connected" | awk '{print $3}')
+    # Para o monitor primary a orientação é a 5ª palavra, para os outros é a 4ª
+    if [[ "$flag" == "primary" ]]; then
+        # shellcheck disable=SC2155
+        local orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $5}')
+    else
+        # shellcheck disable=SC2155
+        local orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $4}')
+    fi
+    if [[ "$orientation" == "(normal" ]]; then
+        orientation="normal"
+    fi
+    echo "$orientation"
+}
+
+# Funções principais
+
+# Mostra o texto de ajuda
+cmd_help() {
+    echo "Uso: $(basename "$0") help | id | orientation [id] | rotate [id] [orientation]"
+    echo "Controlar a orientação do(s) monitor(es)"
+    echo "Comandos:"
+    echo "  help                       Mostra este texto de ajuda."
+    echo "  id                         Lista o ID dos monitores ligados."
+    echo "  orientation [id]           Apresenta a orientação do monitor 'id'."
+    echo "                             Se omitido mostra a orientação do monitor atual."
+    echo "  rotate [id] [orientation]  Roda o monitor 'id' para a orientação orientation."
+    echo "                             Orientações possíveis: normal right inverted left"
+    echo "                             'orientation' omitido = roda o monitor 90 graus no"
+    echo "                             sentido horário."
+    echo "                             'id' omitido = roda o primeiro monitor ligado."
+    return 0
+}
+
+# Mostra os IDs do monitores conectados
+cmd_id() {
+    echo "Monitores conectados:"
+    xrandr | grep " connected" | grep -v "disconnected" | awk '{print $1}'
+    return 0
+}
+
+# Devolve a orientação do monitor passado como parâmetro ou do primeiro monitor.
+cmd_orientation() {
+    local monitor_id="${1}"
+    if [[ -z "$monitor_id" ]]; then
+        monitor_id=$(get_first_connected_monitor_id)
+    fi
+    if [[ -z "$monitor_id" ]]; then
+        "Erro: Nenhum monitor encontrado"
+        return 1
+    fi
+
+    # shellcheck disable=SC2155
+    local orientation=$(get_monitor_orientation "$monitor_id")
+    if [[ -z "$orientation" ]]; then orientation="desconhecida"; fi
+    echo "Orientação:"
+    echo "  $monitor_id: $orientation"
+    return 0
+}
+
+# Roda o monitor indicado ou o primeiro monitor, para a orientação indicada ou 90º no sentido horário.
+cmd_rotate() {
+    local monitor_id="${1}"
+    local req_orientation="${2}"
+
+    if [[ -z "$monitor_id" ]]; then
+        monitor_id=$(get_first_connected_monitor_id)
+    fi
+    if [[ -z "$monitor_id" ]]; then
+        "Erro: Nenhum monitor encontrado"
+        return 1
+    fi
+    
+    # shellcheck disable=SC2155
+    local orientation=$(get_monitor_orientation "$monitor_id")
+    local final_orientation=""
+
+    if [[ -z "$req_orientation" ]]; then
+        case "$orientation" in
+            "normal") final_orientation="right" ;;
+            "right") final_orientation="inverted" ;;
+            "inverted") final_orientation="left" ;;
+            *) final_orientation="normal" ;;
+        esac
+    else
+        case "$req_orientation" in
+            "normal"|"right"|"inverted"|"left")
+                final_orientation="$req_orientation"
+            ;;
+            *)
+                echo "Erro: Orientação inválida '$req_orientation'."
+                echo "Orientação possíveis: normal right inverted left"
+                return 1
+            ;;
+        esac
+    fi
+
+    echo "A rodar '$monitor_id' para '$final_orientation'."
+    xrandr --output "$monitor_id" --rotate "$final_orientation"
+}
+
+cmd_mirror() {
+    # Vídeo
+    # Executa o comando xrandr e filtra os nomes dos monitores conectados
+    local monitors=($(xrandr | grep ' connected' | awk '{print $1}'))
+    if [[ ${#monitors[@]} -lt 2 ]]; then
+	echo "O sistema só tem um monitor"
+	return 0
+    fi
+    # encontrar a menor resolução (horizontal)
+    local minres=""
+    for monitor in "${monitors[@]}"; do
+	# obter a resolução do monitor
+	# shellcheck disable=SC2155
+	local res=$(xrandr | grep "^$monitor connected" | sed 's/primary //' | awk '{print $3}' | sed 's/+.*//')
+
+	[[ -z "$res" ]] && continue
+	if [[ -z "$minres" ]]; then
+	    minres="$res"
+	else
+	    # shellcheck disable=SC2155
+	    local curr_hor=$(echo "$res"|awk -Fx '{print $1}')
+	    # shellcheck disable=SC2155
+	    local min_hor=$(echo "$minres"|awk -Fx '{print $1}')
+	    [[ "$curr_hor" -lt "$min_hor" ]] && minres="$res"
+	fi
+    done
+    local cmd="xrandr --output ${monitors[0]} --mode $minres"
+    for ((i=1; i<${#monitors[@]}; i++)); do
+        cmd="$cmd --output ${monitors[$i]} --mode $minres --same-as ${monitors[0]}"
+    done
+    eval $cmd
+    # Áudio
+    # shellcheck disable=SC2155
+    local current_sink=$(pactl get-default-sink)
+    if hdmi_connected; then
+        # shellcheck disable=SC2155
+        local hdmi_sink=$(pactl list short sinks | grep -i "hdmi" | awk '{print $2}' | head -n 1)
+        [[ -n "$hdmi_sink" && "$current_sink" != "$hdmi_sink" ]] && change_audio_output "$hdmi_sink" "HDMI"
+    else
+        # shellcheck disable=SC2155
+        local analog_sink=$(pactl list short sinks | grep -i "analog" | awk '{print $2}' | head -n 1)
+        [[ -n "$analog_sink" && "$current_sink" != "$analog_sink" ]] && change_audio_output "$analog_sink" "saĩda analógica"
+    fi
+}
+
+
+
+# main
+cmd=${1,,}
+
+if [[ "$#" -eq 0 || "$cmd" == "help" ]]; then
+    cmd_help
+    exit 0
+fi
+shift
+case "$cmd" in
+    "id") cmd_id "$@" ;;
+    "orientation") cmd_orientation "$@" ;;
+    "rotate") cmd_rotate "$@" ;;
+    "mirror") cmd_mirror "$@" ;;
+    *)
+        echo "Erro: Comando desconhecido '$cmd'."
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac
+
+exit 0
+

@@ -1,0 +1,159 @@
+#!/bin/bash
+# windoze-part-restore v 1.1 2025-12-21
+
+get_part_n() {
+    local disco="$1"
+    local numero="$2"
+    # Lista as partições, filtra, e usa o sed para apanhar a linha correspondente ao número
+    lsblk -p -n -r -o NAME,TYPE --sort START "$disco" | \
+    awk -v n="$numero" '$2=="part" {count++} count==n {print $1; exit}'
+}
+
+select_disk() {
+    MENU_OPTIONS=()
+
+    while read -r linha; do
+        DISCO=$(echo "$linha" | awk '{print $1}')
+        DESC=$(echo "$linha" | cut -d' ' -f2-)
+        MENU_OPTIONS+=("$DISCO" "$DESC")
+    done < <(lsblk -d -p -n -o NAME,SIZE,MODEL | grep -E '^/dev/(sd|nvme|vd|mmcblk)')
+
+    [[ ${#MENU_OPTIONS[@]} -eq 0 ]] && { echo "Erro: Nenhum disco encontrado." >&2; exit 1; }
+
+    DISCO_ESCOLHIDO=$(whiptail --title "Seleção de Disco" \
+                              --menu "Escolha o disco de destino (CUIDADO: Será apagado!)" \
+                              15 60 4 \
+                              "${MENU_OPTIONS[@]}" \
+                              3>&1 1>&2 2>&3)
+    [[ $? -ne 0 ]] && { echo "Operação cancelada pelo utilizador." >&2; exit 1; }
+    echo "$DISCO_ESCOLHIDO"
+}
+
+select_fsa() {
+    IMAGENS="/media/data/images"
+    [[ ! -d "$IMAGENS" ]] && { echo "Erro: A pasta $IMAGENS não existe." >&2; exit 1; }
+    shopt -s nullglob
+    ARQUIVOS=("$IMAGENS"/*.fsa)
+    shopt -u nullglob
+    [[ ${#ARQUIVOS[@]} -eq 0 ]] && { echo "Erro: Nenhum ficheiro .fsa encontrado na pasta." >&2; exit 1; }
+    echo "Selecione a imagem para restaurar" >&2
+    PS3="Digite o número da imagem: "
+    select arquivo_completo in "${ARQUIVOS[@]}"; do
+        if [ -n "$arquivo_completo" ]; then
+            echo "$arquivo_completo"
+            break
+        else
+            echo "Opção inválida." >&2
+        fi
+    done
+}
+
+mk_gpt() {
+    local dsk="$1"
+    wipefs -a --force "$dsk"
+    local swap_end=$(free -m | awk '/^Mem.:/{print $2}')
+    swap_end=$((swap_end + 1540))
+    parted -s -a optimal "$dsk" -- \
+        mklabel gpt \
+        mkpart "BIOSBOOT" 1MiB 2MiB \
+        set 1 bios_grub on \
+        mkpart "EFI" fat32 2MiB 514MiB \
+        set 2 esp on \
+        mkpart "SWAP" linux-swap 514MiB ${swap_end}MiB \
+        mkpart "WINDOZE" ext4 ${swap_end}MiB 100%
+    partprobe "$dsk"
+    udevadm settle
+    parted -s "$dsk" print
+}
+
+# ==== MAIN
+[[ $EUID -ne 0 ]] && { echo "ERRO: São necessárias permissões de root."; exit 1; }
+if [[ -n "$1" ]]; then
+    DISK="$1"
+else
+    DISK=$(select_disk)
+fi
+[[ ! -b "$DISK" ]] && { echo "ERRO: Dispositivo inválido $DISK"; exit 1; }
+if [[ -n "$2" ]]; then
+    SRC="$2"
+else
+    SRC=$(select_fsa)
+fi
+[[ ! -f "$SRC" ]] && { echo "ERRO: Ficheiro $SRC não encontrado"; exit 1; }
+if [[ "$3" == "-y" ]]; then
+    echo "Modo automático (-y) detetado. A iniciar restauro sem confirmação..."
+else
+    echo "-----------------------------------------------------"
+    echo "ATENÇÃO: O disco $DISK será APAGADO."
+    echo "Vou restaurar '$SRC' para '$DISK'."
+    echo "-----------------------------------------------------"
+    echo -n "Continuar? [s/n]: "
+    read a
+    [[ "${a,,}" != "s" ]] && { echo "Operação cancelada"; exit 1; }
+fi
+
+apt install -y parted dosfstools grub-pc-bin grub-efi-amd64-bin
+mk_gpt "$DISK"
+for i in {1..10}; do
+    PART2=$(get_part_n "$DISK" 2)
+    PART3=$(get_part_n "$DISK" 3)
+    PART4=$(get_part_n "$DISK" 4)
+    [[ -n "$PART4" && -b "$PART2" ]] && { echo "Partições detetadas."; break; }
+    sleep 1
+done
+mkfs.vfat -F32 -n "EFI" "$PART2"
+mkswap "$PART3"
+#mkfs.ext4 -F -L "WINDOZE" "$PART4"
+fsarchiver restfs "$SRC" id=0,dest="$PART4" -j$(nproc) -v
+[[ $? -ne 0 ]] && { echo "ERRO FATAL: O fsarchiver falhou. O restauro foi abortado."; exit 1; }
+lsblk "$DISK"
+UUID_EFI=$(blkid -s UUID -o value "$PART2")
+UUID_SWAP=$(blkid -s UUID -o value "$PART3")
+UUID_ROOT=$(blkid -s UUID -o value "$PART4")
+TARGET="/mnt/target"
+mkdir -p "$TARGET"
+mount "$PART4" "$TARGET"
+mkdir -p "$TARGET"/boot/efi
+mount "$PART2" "$TARGET"/boot/efi
+FSTAB="$TARGET"/etc/fstab
+cat > "$FSTAB" <<EOF
+# /etc/fstab: static file system information.
+#
+# Use 'blkid' to print the universally unique identifier for a device; 
+# this may be used with UUID= as a more robust way to name devices
+# that works even if disks are added and removed. See fstab(5).
+#
+# <file system>             <mount point>  <type>  <options>              <dump>  <pass>
+
+# Partição Raiz (/)
+UUID=$UUID_ROOT    /              ext4    defaults,noatime       0       1
+
+# Partição EFI (/boot/efi)
+UUID=$UUID_EFI     /boot/efi      vfat    defaults,umask=0077    0       2
+
+# Partição Swap
+UUID=$UUID_SWAP    none           swap    sw                     0       0
+EOF
+mkdir -p "$TARGET"/etc/initramfs-tools/conf.d/
+echo "RESUME=UUID=${UUID_SWAP}" > "$TARGET"/etc/initramfs-tools/conf.d/resume
+mkdir -p "$TARGET"/dev/pts "$TARGET"/sys "$TARGET"/proc "$TARGET"/run
+mount --bind /dev "$TARGET"/dev
+mount --bind /dev/pts "$TARGET"/dev/pts
+mount --bind /proc "$TARGET"/proc
+mount --bind /sys "$TARGET"/sys
+mount --bind /run "$TARGET"/run
+if [ -d /sys/firmware/efi/efivars ]; then
+    mkdir -p "$TARGET/sys/firmware/efi/efivars"
+    mount --bind /sys/firmware/efi/efivars "$TARGET/sys/firmware/efi/efivars"
+fi
+chroot "$TARGET" /bin/bash <<EOF
+apt update
+apt install -y grub-pc-bin grub-efi-amd64-bin
+update-initramfs -u
+grub-install --target=i386-pc --recheck "$DISK"
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --recheck
+update-grub
+exit
+EOF
+sync
+umount -R "$TARGET"

@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# user-manage v1.07 - 2025-12-17
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+
+# Matar os processos do $user
+user_kill() {
+    local user="$1"
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    pkill -u "$user" >/dev/null 2>&1
+    sleep 1
+    pkill -9 -u "$user" >/dev/null 2>&1
+    sleep 1
+}
+
+# Ativa o serviço de reposição do aluno no boot
+ativar_limpa_aluno() {
+    local serv="limpar-aluno.service"
+    local path="/opt/aevh/etc/systemd/$serv"
+    local dst="/etc/systemd/system/"
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
+    [[ ! -f "$path" ]] && { error "Serviço não encontrado: $path"; return 1; }
+    if ! copy_check "$path" "$dst"; then 
+        error "Erro a copiar o ficheiro do serviço"; 
+        return 1
+    fi
+    systemctl daemon-reload
+    if systemctl enable limpar-aluno.service; then
+        info "Limpeza automática ativada com sucesso"
+    else
+        error "Falha ao ativar o serviço $serv"
+        return 1
+    fi
+}
+
+# Desativa o serviço de reposição do aluno
+desativar_limpa_aluno() {
+    local serv="limpar-aluno.service"
+    local path="/etc/systemd/system/$serv"
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
+    systemctl stop "$serv" 2>/dev/null
+    if systemctl disable "$serv"; then
+        if [[ -f "$path" ]]; then
+            rm "$path"
+            systemctl daemon-reload
+            info "Limpeza automática desativada e ficheiro removido."
+        else
+            info "Limpeza automática desativada."
+        fi
+    else
+        error "Falha ao desativar o serviço $serv"
+        return 1
+    fi
+}
+
+# Grava a pasta home do utilizador
+user_save() {
+    local user="$1" tgz homedir mother child excludes next
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    ! id -u "$user" >/dev/null 2>&1 && fatal "Utilizador $user não existe"
+    tgz="$AEVH_DATA/user/$user.tgz"
+    # shellcheck disable=SC2155
+    homedir=$(get_home "$user")
+    # shellcheck disable=SC2155
+    mother=$(dirname "$homedir")
+    child=$(basename "$homedir")
+    [[ ! -d "$homedir" ]] && fatal "Diretoria $homedir não existe"
+    excludes=(
+            --exclude="$child/.cache"
+            --exclude="$child/.local/share/Trash"
+            --exclude="$child/Transferências"
+            --exclude="*.tmp"
+            --exclude="*.log"
+            --exclude="$child/.wine"
+            --warning=no-file-changed
+        )
+
+    info "A salvar o perfil de $user"
+        user_kill "$user"
+    if tar cpf "$tgz.new" -C "$mother" -I 'pigz -9' "${excludes[@]}" "$child"; then
+            info "Ficheiro $tgz criado com sucesso"
+        else
+            fatal "Falha crítica ao criar $tgz"
+        fi
+    if [[ -f "$tgz.9" ]]; then rm "$tgz.9"; fi
+    for (( i=8; i>=1; i--)); do
+        next=$((i+1))
+        [[ -f "$tgz.$i" ]] && mv "$tgz.$i" "$tgz.$next" 
+    done
+    [[ -f "$tgz" ]] && mv "$tgz" "$tgz.1" 
+    if mv "$tgz.new" "$tgz"; then
+        chown master:master "$tgz"
+        info "Perfil de $user atualizado e backups rodados"
+    else
+        fatal "Erro ao finalizar $tgz"
+    fi
+}
+
+# Elimina o utilizador $1
+user_del () {
+    local user="$1"
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    info "A remover $user"
+    ! id -u "$user" >/dev/null 2>&1 && {
+        warn "Utilizador $user não encontrado (nada a remover)."
+        return 0
+    }
+    user_kill "$user"
+    deluser --remove-home "$user" >/dev/null 2>&1 && { info "Utilizador $user removido"; return 0; }
+    userdel -r "$user" >/dev/null 2>&1 && { info "Utilizador $user removido (via userdel)."; return 0; }
+    warn "Falha crítica ao remover $user. (Processos presos?)"
+    return 1
+}
+
+# Adiciona o utilizador $1
+user_add () {
+    local pass passfile user="$1" groups
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    info "A adicionar $user"
+    passfile="$AEVH_DATA/user/$user.psw"
+    [[ ! -f "$passfile" ]] && { error "Ficheiro de password $passfile não encontrado"; return 1; }
+	pass=$(cat "$passfile")
+    [[ -z "$pass" ]] && { error "O ficheiro de password está vazio"; return 1; }
+    groups="audio,video,plugdev"
+    getent group netdev >/dev/null && groups="$groups,netdev"
+    useradd -m -p "$pass" -c "${user^}" -s /bin/bash -G "$groups" "$user" || { warn "Não consegui adicionar o utilizador $user"; return 1; } 
+    info "Utilizador $user criado"
+    return 0
+}
+
+set_xfce_session() {
+    local user="$1" session_file session_name accounts_dir accounts_file user_home user_group dmrc_file
+    [[ -z "$user" ]] && { error "set_xfce_session(): Nome de utilizador não fornecido." >&2; return 1; }
+    ! id "$user" &>/dev/null && { error "O utilizador '$user' não existe." >&2; return 1; }
+    session_file="/usr/share/xsessions/xfce.desktop"
+    [[ ! -f "$session_file" ]] && { error "Sessão XFCE não encontrada em $session_file. Instale o xfce4 primeiro." >&2; return 1; }
+    session_name=$(basename "$session_file" .desktop)
+    echo "INFO: A configurar ambiente XFCE para $user..."
+    accounts_dir="/var/lib/AccountsService/users"
+    accounts_file="$accounts_dir/$user"
+    mkdir -p "$accounts_dir"
+    if [[ ! -f "$accounts_file" ]]; then
+        printf "[User]\nSession=%s\nXSession=%s\n" "$session_name" "$session_name" > "$accounts_file"
+    else
+        if ! grep -q "^\[User\]" "$accounts_file"; then
+            echo "[User]" >> "$accounts_file"
+        fi
+        if grep -q "^Session=" "$accounts_file"; then
+            sed -i "s/^Session=.*/Session=$session_name/" "$accounts_file"
+        else
+            sed -i "/\[User\]/a Session=$session_name" "$accounts_file"
+        fi
+        if grep -q "^XSession=" "$accounts_file"; then
+            sed -i "s/^XSession=.*/XSession=$session_name/" "$accounts_file"
+        else
+            sed -i "/\[User\]/a XSession=$session_name" "$accounts_file"
+        fi
+    fi
+
+    # Método 2: .dmrc (Legado/Fallback no Home do Utilizador)
+    user_home=$(getent passwd "$user" | cut -d: -f6)
+    dmrc_file="$user_home/.dmrc"
+    {
+        echo "[Desktop]"
+        echo "Session=$session_name"
+    } > "$dmrc_file"
+    # CRÍTICO: Ajustar permissões (LightDM ignora .dmrc se tiver permissões erradas)
+    user_group=$(id -gn "$user")
+    chown "$user:$user_group" "$dmrc_file"
+    chmod 644 "$dmrc_file"
+
+    if systemctl is-active --quiet accounts-daemon; then
+        systemctl restart accounts-daemon
+    fi
+
+    echo "SUCESSO: Ambiente de $user alterado para $session_name."
+    return 0
+}
+
+# Repõe a pasta home do user $1
+user_restore() {
+    local user="$1" fast="$2" infile winefile homedir mother autostart
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    info "A repor o perfil do $user $fast"
+    infile="$AEVH_DATA/user/$user.tgz"
+    winefile="$AEVH_DATA/user/wine.tgz"
+    assert "Perfil $infile não encontrado" test -f "$infile"
+    homedir=$(get_home "$user")
+    mother=$(dirname "$homedir")
+    mkdir -p "$mother"
+    user_kill "$user"
+    rm -rf "$homedir"
+    check "Não consegui descomprimir $infile" tar xzf "$infile" -C "$mother" 
+    if [[ -z "$fast" && $user != "master" && -f "$winefile" ]]; then
+    check "Não consegui descomprimir os ficheiros do Wine." tar xzf "$winefile" -C "$homedir"
+    fi
+    check "Erro em chown $homedir" chown -R "$user":"$user" "$homedir"
+    mkdir -p "/media/$user" > /dev/null 
+    chown "$user":"$user" "/media/$user"
+    chmod 750 "/media/$user"
+    autostart="$homedir/.config/autostart"
+    mkdir -p "$autostart"
+    copy_check "$AEVH_DATA/desktop/monitor-mirror.desktop" "$autostart/"
+    copy_check "$AEVH_DATA/desktop/user-options.desktop" "$autostart/"
+    if is_xfce4; then
+        #copy_check "/usr/share/applications/plank.desktop" "$autostart/"
+        copy_check "$AEVH_DATA/desktop/Picom.desktop" "$autostart/"
+    fi
+    set_xfce_session "$user"
+    chown -R "$user":"$user" "$homedir"
+    info "Utilizador $user restaurado"
+}
+
+# Apaga e volta a criar o user $1
+user_reset() {
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    [[ "$#" -lt 1 ]] && { warn "user_reset(): Não foi indicado o utilizador"; return 1; } 
+    local user="$1" fast="$2"
+    user_del "$user" || { warn "user_reset(): Não consegui eliminar $user"; return 1; }
+    user_add "$user" || { warn "user_reset(): Não consegui adicionar $user"; return 1; }
+    user_restore "$user" "$fast"
+}
+
+# Definir temas visuais do $user
+user_set_options() {
+    local user="$1"
+    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    user_kill "$user"
+    runuser -u "$user" -- dbus-launch --exit-with-session bash "$AEVH_BIN/user-options"
+}
+
+# Ajuda
+help() {
+    cat << EOF
+Uso: $(basename "$0") <operação> <utilizador> [fast]
+
+O parâmetro obrigatório <operação> pode ser:
+    save        Faz uma cópia da homedir do utilizador.
+    del         Elimina o utilizador e todos os ficheiros.
+    add         Adiciona o utilizador ao sistema.
+    restore     Restaura a homedir a partir de uma cópia.
+    reset       Elimina, Recria e Restaura o utilizador (Full Reset).
+    options     Define opções visuais e associações de ficheiros Office.
+    clean_on    Ativa a limpeza automática no arranque (apenas 'aluno').
+    clean_off   Desativa a limpeza automática.
+
+Parâmetros:
+    utilizador  Nome do utilizador (ex: aluno, professor).
+    fast        (Opcional) Restauro rápido.
+EOF
+}
+
+# main()
+[[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+[[ "$#" -lt 2 ]] && { help; exit 0; }
+getroot "$@"
+COMM="$1"
+USER="$2"
+FAST="$3"
+
+case "$COMM" in
+    "save") user_save "$USER" ;;
+    "del") user_del "$USER" ;;
+    "add") user_add "$USER" ;;
+    "restore") user_restore "$USER" "$FAST" ;;
+    "reset") user_reset "$USER" "$FAST" ;;
+    "options") user_set_options "$USER" ;;
+    "clean_on")
+        if [[ "$USER" == "aluno" ]]; then
+            ativar_limpa_aluno
+        else
+            warn "Utilizador '$USER' não suportado na autolimpeza"
+        fi
+    ;;
+    "clean_off")
+        if [[ "$USER" == "aluno" ]]; then
+            desativar_limpa_aluno
+        else
+            warn "Utilizador '$USER' não suportado na autolimpeza"
+        fi
+    ;;
+    *) help ;;
+esac

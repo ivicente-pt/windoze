@@ -1,0 +1,28 @@
+# --- Seguranca ---
+.env
+*.secret
+*.pem
+*.key
+credential*.*
+
+# --- Sistema e Editores ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*~
+*.swp
+
+# --- Logs e Temporarios ---
+*.log
+tmp/
+*.tmp
+out/
+logs/*
+!logs/.gitkeep
+
+# --- Outros ---
+*.bak
+*.old
+static/
+build/

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# auto-apt-proxy v1.05 - 2025-12-11
+# Definir o proxy para usar com o apt, se estiver disponível
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+getroot "$@"
+
+# Lista de proxies
+APTPROXIES=(
+	"10.115.201.230:3142"
+	"10.115.201.231:3142"
+)
+# Ficheiro de configuração do proxy para apt
+PROXYCONF="/etc/apt/apt.conf.d/02-apt-proxy.conf"
+
+[[ -e "$PROXYCONF" && ! -w "$PROXYCONF" ]] && \
+    fatal "Não tenho permissão de escrita em $PROXYCONF"
+
+# Tenta definir um proxy
+info "A procurar um proxy APT disponível..."
+for PROXY in "${APTPROXIES[@]}"; do
+    IP="${PROXY%%:*}"
+    PORT="${PROXY##*:}"
+    if test_port "$IP" "$PORT"; then
+		{
+			echo "Acquire::http::Proxy \"http://$IP:$PORT\";"
+			echo "Acquire::https::Proxy \"http://$IP:$PORT\";"
+		} > "$PROXYCONF"
+		info "Proxy configurado com sucesso: $IP:$PORT"
+		exit 0
+    fi
+    warn "Proxy $IP:$PORT não respondeu"
+done
+warn "Nenhum proxy APT disponível"
+[[ -f "$PROXYCONF" ]] && { rm "$PROXYCONF"; info "APT em ligação direta"; }

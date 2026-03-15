@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# user-options v1.01 - 2025-12-17
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_ROOT/lib/aevh-tools.sh"
+
+# Variáveis globais
+USERNAME=$(id -un)
+HOMEDIR=$(getent passwd "$USERNAME" | cut -d: -f6)
+
+# Definições visuais
+WALLPAPER="/usr/share/backgrounds/Windoze/Win11.jpg"
+XFWM="Default-hdpi"
+THEME="Fluent-round-Light-compact"
+ICON="wow64-Light"
+FONT="Arimo Regular 10"
+LOGO="distributor-logo-windows"
+
+# Definir as opções do XFCE4
+set_xfce4_options() {
+    info "A definir as opções visuais do XFCE4"
+    
+    # Função auxiliar
+    xfconf() { xfconf-query -c "$1" -p "$2" -s "$3" --create -t "$4"; }
+    
+    local properties
+    mapfile -t properties < <(xfconf-query -c xfce4-desktop -l | grep "last-image$")
+    if [[ ${#properties[@]} -eq 0 ]]; then
+        warn "Nenhuma propriedade de monitor encontrada. O XFCE já iniciou?"
+    else
+        for prop in "${properties[@]}"; do
+            xfconf "xfce4-desktop" "$prop" "$WALLPAPER" string
+        done
+    fi
+    xfconf "XFWM"           "/general/theme"        "$XFWM"     string
+    xfconf "xsettings"      "/Net/ThemeName"        "$THEME"    string
+    xfconf "xsettings"      "/Net/IconThemeName"    "$ICON"     string
+    xfconf "xsettings"      "/Gtk/FontName"         "$FONT"     string
+    xfconf "xfce4-desktop"  "/desktop-icons/style"  2           int
+    xfconf "xfwm4"          "/general/use_compositing" false    bool
+    
+    declare -A folders
+    folders["0,0"]="DESKTOP"
+    folders["1,0"]="DOWNLOAD"
+    folders["2,0"]="TEMPLATES"
+    folders["3,0"]="PUBLICSHARE"
+    folders["4,0"]="DOCUMENTS"
+    folders["5,0"]="MUSIC"
+    folders["6,0"]="PICTURES"
+    folders["7,0"]="VIDEOS"
+    folders["0,1"]="$HOME/Área de Trabalho"
+    folders["1,1"]="$HOME/Transferências"
+    folders["2,1"]="$HOME/Modelos"
+    folders["3,1"]="$HOME/Público"
+    folders["4,1"]="$HOME/Documentos"
+    folders["5,1"]="$HOME/Música"
+    folders["6,1"]="$HOME/Imagens"
+    folders["7,1"]="$HOME/Vídeos"
+    for ((i=0; i<8; i++)); do
+        key="${folders[$i,0]}"
+        path="${folders[$i,1]}"
+        [[ ! -d "$path" ]] && mkdir -p "$path"
+        xdg-user-dirs-update --set "$key" "$path"
+    done
+    
+    xdg-user-dirs-update
+    
+    #xdg-mime default nemo.desktop inode/directory application/x-gnome-saved-search
+    # local panelsave="$AEVH_DATA/user/xfce4-panel-01.tar.bz2"
+    # local panelsave="$AEVH_DATA/user/xfce4-panel-02.tar.bz2"
+    # [[ -f "$panelsave" ]] && xfce4-panel-profiles load "$panelsave"
+}
+
+# Associar as extensões do Office ao OnlyOffice
+set_office_options() {
+    local app="onlyoffice-desktopeditors.desktop"
+    if [[ ! -f "/usr/share/applications/$app" && ! -f "/usr/local/share/applications/$app" ]]; then
+        warn "set_office(): $app não encontrado. Associações ignoradas."
+        return 0
+    fi
+    # Lista de tipos MIME para ficheiros do Microsoft Office
+    declare -A office_types=(
+	["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]="docx"
+        ["application/msword"]="doc"
+        ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]="xlsx"
+        ["application/vnd.ms-excel"]="xls"
+        ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]="pptx"
+        ["application/vnd.ms-powerpoint"]="ppt"
+    )
+
+    # Associar cada tipo MIME ao OnlyOffice
+    info "A associar tipos office ao $app"
+    for mime in "${!office_types[@]}"; do
+    	xdg-mime default "$app" "$mime" >/dev/null 2>&1
+    done
+    if [[ -d "$HOMEDIR/.local/share/mime" ]]; then
+        update-mime-database "$HOMEDIR/.local/share/mime" > /dev/null 2>&1
+    fi
+}
+
+
+# MAIN
+is_root && { warn "Este script não deve ser executado como root nem com sudo."; exit 1; }
+ set_xfce4_options
+set_office_options
+info "Configuração de utilizador concluída"
+
