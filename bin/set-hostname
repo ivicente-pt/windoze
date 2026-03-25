@@ -1,42 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# set-hostname v1.04 - 2025-12-11
+# set-hostname v1.1 - 2026-03-24
 # Altera o hostname da máquina de forma interativa
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-source "$PROJECT_ROOT/lib/aevh-tools.sh"
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+main() {
+    getroot "$@"
+    check_dependencies dialog
+    local ans title="Configuração de Hostname" question="Indique o novo hostname desta máquina:" current
+    current=$(trim "$(< /etc/hostname)")
 
-getroot "$@"
+    # Loop principal
+    while true; do
+        if ! ans=$(dialog --title "$title" --inputbox "$question" 10 50 "$current" 2>&1 >/dev/tty); then
+            log_bye "Alteração cancelada."
+        fi
+        ans=$(trim "$ans")
+        if ! is_valid_hostname "$ans"; then
+            dialog --title "Erro" --msgbox "O hostname '$ans' é inválido.\nUse apenas letras, números e hífenes." 0 0
+            question="Hostname inválido. Tente de novo:"
+            continue
+        fi
+        [[ "$ans" == "$current" ]] && log_bye "O hostname não foi alterado ($ans)."
+        if [[ -f /etc/hosts && "$current" != "localhost" ]]; then
+            safe_current="${current//./\.}"
+            sed -i "s/\b${safe_current}\b/${ans}/g" /etc/hosts
+        fi
+        echo "$ans" > /etc/hostname 
+        if command -v hostnamectl >/dev/null; then
+            hostnamectl set-hostname "$ans"
+        else
+            hostname "$ans"
+        fi
+                
+        log_bye "Hostname alterado para '$ans'."
+    done
+}
 
-! command -v dialog >/dev/null && { echo "A instalar dependência: dialog..."; apt_install dialog; } 
-
-TITLE="Configuração de Hostname"
-QUESTION="Indique o novo hostname desta máquina:"
-CURRENT=$(trim "$(< /etc/hostname)")
-
-# Loop principal
-while true; do
-    ANS=$(dialog --title "$TITLE" --inputbox "$QUESTION" 10 50 "$CURRENT" 2>&1 >/dev/tty)
-    [[ $? -ne 0 ]] && { warn "Alteração cancelada."; break; }
-    ANS=$(trim "$ANS")
-    !  is_valid_hostname "$ANS" && {
-        dialog --title "Erro" --msgbox "O hostname '$ANS' é inválido.\nUse apenas letras, números e hífenes." 0 0
-    	QUESTION="Hostname inválido. Tente de novo:"
-        continue
-    }
-    [[ "$ANS" == "$CURRENT" ]] && { info "O hostname não foi alterado ($ANS)."; break; }
-    [[ -f /etc/hosts ]] && sed -i "s/\b$CURRENT\b/$ANS/g" /etc/hosts
-    echo "$ANS" > /etc/hostname 
-    if command -v hostnamectl >/dev/null; then
-        hostnamectl set-hostname "$ANS"
-    else
-        hostname "$ANS"
-    fi
-            
-    info "Hostname alterado para '$ANS'."
-    break
-done
-
+main "$@"

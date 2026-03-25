@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# windoze-menu v1.05 - 2025-12-17
+# windoze-menu v1.1 - 2026-03-24
 
-# executar antes de obter o root, para ter acesso ao display
-xhost local:root >/dev/null 2>&1
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-source "$PROJECT_ROOT/lib/aevh-tools.sh"
-
-WINDOZE="$AEVH_BIN/windoze"
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
 other_ops() {
-    speak "Menu de operações e teste."
+    local opt
+    log_info "Menu de operações e teste."
     while true; do
-		local TITLE="Operações individuais e de teste"
-		local MENU="Escolher a operação"
-		local OPT
-		OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 0 \
+		if ! opt=$(dialog --title "Operações individuais e de teste" --menu "Escolher a operação" 0 0 0 \
 			"1" "Verificar proxy-cache de apt" \
 			"2" "Teste de notificações (notify-all)" \
 			"3" "Definir o hostname" \
@@ -26,37 +18,34 @@ other_ops() {
 			"5" "Teste de shutdown-notify" \
 			"6" "Executar o shutdown spread" \
 			"7" "Limpeza de sistema" \
-			"0" "Voltar"\
-		3>&1 1>&2 2>&3)
-		RET=$?
-		[[ $RET -ne 0 || "$OPT" == "0" ]] && return 0
-		case $OPT in
-			"1") clear; "$AEVH_BIN"/auto-apt-proxy ;;
-			"2")
-				clear
-				speak "A testar notificação"
-				apt_install libnotify-bin 
-				"$AEVH_BIN"/notify-all teste
-			;;
-			"3") clear; "$AEVH_BIN"/set-hostname ;;
-			"4") clear; "$AEVH_BIN"/monitor-ctrl mirror ;;
-			"5") clear; "$AEVH_BIN"/shutdown-notify ;;
-			"6") clear; "$AEVH_BIN"/shutdown-spread ;;
-			"7") clear; "$WINDOZE" clean ;;
-			"0") return 0 ;;
-		esac
-		keywait
+			"0" "Voltar" 3>&1 1>&2 2>&3); then
+            return 0
+        fi
+        case $opt in
+            "1") clear; "$AEVH_BIN"/auto-apt-proxy ;;
+            "2")
+                clear
+                log_info "A testar notificação"
+                check_dependencies libnotify-bin 
+                "$AEVH_BIN"/notify-all teste
+            ;;
+            "3") clear; "$AEVH_BIN"/set-hostname ;;
+            "4") clear; "$AEVH_BIN"/monitor-ctrl mirror ;;
+            "5") clear; "$AEVH_BIN"/shutdown-notify ;;
+            "6") clear; "$AEVH_BIN"/shutdown-spread ;;
+            "7") clear; "$WINDOZE" clean ;;
+            "0") return 0 ;;
+        esac
+        keywait
 	done
 }
 
 # Instalar componentes
 installations() {
-    speak "Menu de instalações."
+    local opt
+    log_info "Menu de instalações."
     while true; do
-        local TITLE="Instalações"
-        local MENU="Escolher a operação"
-        local OPT
-        OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 0 \
+        if ! opt=$(dialog --title "Instalações" --menu "Escolher a operação" 0 0 0 \
             "A" "Instalação base (essencial)" \
             "B" "Interface gráfica (GUI)" \
             "C" "Crontab (tarefas agendadas)" \
@@ -67,13 +56,10 @@ installations() {
             "H" "YSoft SafeQ Client" \
             "I" "Browsers (Firefox, Google Chrome)" \
             "J" "Office (LibreOffice, OnlyOffice)" \
-            "0" "Voltar"\
-		3>&1 1>&2 2>&3)
-        RET=$?
-        [[ $RET -ne 0 || "$OPT" == "0" ]] && return 0
-        OPT=${OPT^^}
-        speak "A iniciar instalação."
-		case $OPT in
+            "0" "Voltar" 3>&1 1>&2 2>&3); then
+            return 0
+        fi
+		case $opt in
 	    	"A") clear; "$WINDOZE" install base ;;
             "B") clear; "$WINDOZE" install gui ;;
             "C") clear; "$WINDOZE" install crontab ;;
@@ -91,12 +77,10 @@ installations() {
 
 # Desinstalar componentes
 uninstallations() {
-    speak "Menu de desinstalações."
+    local opt
+    log_info "Menu de desinstalações."
     while true; do
-        local TITLE="Instalações"
-        local MENU="Escolher componente a remover"
-		local OPT
-    	OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 0 \
+    	if ! opt=$(dialog --title "Desinstalações" --menu "Escolher componente a remover" 0 0 0 \
             "1" "Interface gráfica" \
             "2" "Crontab" \
             "3" "OCS Agent" \
@@ -105,12 +89,10 @@ uninstallations() {
             "6" "YSoft Client" \
             "7" "Google Chrome" \
             "8" "OnlyOffice" \
-            "0" "Voltar"\
-		3>&1 1>&2 2>&3)
-        RET=$?
-        [[ $RET -ne 0 || "$OPT" == "0" ]] && return 0
-        [[ "$OPT" != "0" ]] && speak "A remover componente."
-		case $OPT in
+            "0" "Voltar" 3>&1 1>&2 2>&3); then
+            return 0
+        fi
+		case $opt in
             "1") "$WINDOZE" remove gui ;;
             "2") "$WINDOZE" remove crontab ;;
             "3") "$WINDOZE" remove ocs ;;
@@ -124,41 +106,41 @@ uninstallations() {
     done
 }
 
-PATH="$PATH:$AEVH_BIN"
-TITLE="Windoze - Admin - AEVH"
-MENU="Menu Principal de Gestão:"
+main () {
+    xhost local:root >/dev/null 2>&1
+    getroot "$@"
+    PATH="$PATH:$AEVH_BIN"
+    WINDOZE="$AEVH_BIN/windoze"
+    check_dependencies dialog
+    log_info "Bem vindo ao sistema de gestão."
+    while true; do
+        clear
+        if ! opt=$(dialog --title "AEVH Windoze" --menu "Gestão principal" 0 0 0 \
+            "1" "Atualizar sistema" \
+            "2" "Instalar componentes..." \
+            "3" "Remover componentes..." \
+            "4" "Gerir perfil da máquina..." \
+            "5" "Gerir utilizadores..." \
+            "6" "Outras operações / Testes..." \
+            "0" "Sair" 3>&1 1>&2 2>&3); then return 0
+        fi
+        case $opt in
+            "1")
+                clear
+                log_info "A atualizar e corrigir o sistema"
+                apt_update
+                apt_upgrade
+                apt_fix
+                info "Atualização concluída"
+                keywait
+            ;;
+        "2") installations ;;                                   
+        "3") uninstallations ;;                                  
+        "4") "$AEVH_BIN"/profile-menu ;;
+        "5") "$AEVH_BIN"/user-menu ;;                       
+        "6") other_ops ;;
+        esac
+    done
+}
 
-# main()
-getroot "$@"
-apt_install dialog
-speak "Bem vindo ao sistema de gestão."
-while true; do
-    clear
-    OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 0 \
-        "1" "Atualizar sistema" \
-        "2" "Instalar componentes..." \
-        "3" "Remover componentes..." \
-        "4" "Gerir perfil da máquina..." \
-        "5" "Gerir utilizadores..." \
-        "6" "Outras operações / Testes..." \
-        "0" "Sair"\
-    3>&1 1>&2 2>&3)
-    RET="$?"
-    [[ "$RET" -ne 0 || "$OPT" == "0" ]] && { clear; speak "A sair do sistema."; exit 0; }
-    case $OPT in
-        "1")
-            clear
-            info "A atualizar e corrigir o sistema"
-            apt_update
-            apt_upgrade
-            apt_fix
-            info "Atualização concluída"
-            keywait
-        ;;
-	"2") clear; installations ;;                                   
-	"3") clear; uninstallations ;;                                  
-	"4") clear; "$AEVH_BIN"/profile-menu ;;
-	"5") clear; "$AEVH_BIN"/user-menu ;;                       
-	"6") clear; other_ops ;;
-    esac
-done
+main "$@"

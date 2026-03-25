@@ -1,52 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shutdown-notify v1.02 - 2025-11-22
+# shutdown-notify v1.1 - 2026-03-24
+
 # Verifica se há um encerramento a decorrer. Se faltar um múltiplo de 5 ou menos de 5 minutos
 # para o encerramento, notifica o utilizador, dando a opção de cancelar o encerramento em curso.
 # Se for indicado um parâmetro (qualquer) mostra o notify agora.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-# shellcheck source=/dev/null
-source "$PROJECT_ROOT/lib/aevh-tools.sh"
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
-SHUTFILE=/run/systemd/shutdown/scheduled
+main() {
+    local shutfile="/run/systemd/shutdown/scheduled"
+    local target_sec now_sec diff_sec min usec force_notify="${1:-}" aviso btn_ok btn_cancel ans out
+    [[ ! -f "$shutfile" ]] && exit 0
+    usec=$(grep -Po '^USEC=\K[0-9]+' "$shutfile" || true)
+    [[ -z "$usec" ]] && exit 0
 
-# Se o ficheiro não existe termina aqui o script
-[[ ! -f "$SHUTFILE" ]] && exit 0
+    target_sec=$((usec / 1000000))
+    now_sec=$(date +%s)
+    diff_sec=$((target_sec - now_sec))
 
-# Main
+    [[ "$diff_sec" -lt 0 ]] && exit 0
+    min=$((diff_sec / 60))
+    if [[ -n "$force_notify" || "$min" -lt 5 || $((min % 5)) -eq 0 ]]; then
+        aviso="O sistema vai encerrar dentro de $min minutos!"
+        btn_ok="Ok, continuar com o encerramento"
+        btn_cancel="Cancelar encerramento"
+        log_info "$aviso"
+        ans=$(notify -w -u critical -A "$btn_ok" -A "$btn_cancel" "Atenção: $aviso")
 
-# shellcheck source=/dev/null
-source "$SHUTFILE"
-TARGET_SEC=$((USEC / 1000000))
-NOW_SEC=$(date +%s)
-DIFF_SEC=$((TARGET_SEC - NOW_SEC))
+        [[ -z "$ans" ]] && log_bye "User -> Sem resposta (timeout)."
+        [[ "$ans" == "0" || "$ans" == "$btn_ok" ]] && log_bye "User -> Escolheu prosseguir com o encerramento."
 
-[[ "$DIFF_SEC" -lt 0 ]] && exit 0
-MIN=$((DIFF_SEC / 60))
-if [[ -n "$1" || "$MIN" -lt 5 || $((MIN % 5)) -eq 0 ]]; then
-    log "Encerramento agendado detetado para daqui a $MIN minutos."
-    
-    AVISO="O sistema vai encerrar dentro de $MIN minutos!"
-    BTN_OK="Ok, continuar com o encerramento"
-    BTN_CANCEL="Cancelar encerramento"
-
-    ANS=$(notify -w -u critical -A "$BTN_OK" -A "$BTN_CANCEL" "Atenção: $AVISO")
-
-    [[ -z "$ANS" ]] && bye "User -> Sem resposta (timeout)."
-
-    [[ "$ANS" == "0" || "$ANS" == "$BTN_OK" ]] && bye "User -> Escolheu prosseguir com o encerramento."
-
-    log "Utilizador solicitou cancelamento do encerramento."
-    OUT=$(/usr/sbin/shutdown -c 2>&1)
-    
-    if [[ ! -f "$SHUTFILE" ]]; then
-        notify "Informação:" "Encerramento cancelado com sucesso."
-        log "Encerramento cancelado."
-    else
-        notify "Atenção:" "Não foi possível cancelar o encerramento!"
-        error "Falha ao cancelar encerramento: $OUT"
+        log_info "Utilizador solicitou cancelamento do encerramento."
+        if out=$(/usr/sbin/shutdown -c 2>&1); then
+            notify "Informação:" "Encerramento cancelado com sucesso."
+            log_info "Encerramento cancelado."
+        else
+            notify "Atenção:" "Não foi possível cancelar o encerramento!"
+            log_error "Falha ao cancelar encerramento: $out"
+        fi
     fi
-fi
+}
+
+main "$@"

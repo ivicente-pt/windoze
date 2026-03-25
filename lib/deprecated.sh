@@ -69,3 +69,28 @@ set_cinnamon_options() {
         rm -f "$config.tmp"
     fi
 }
+
+
+# Associar as extensões do Office ao OnlyOffice
+set_office_options() {
+    local app="onlyoffice-desktopeditors.desktop"
+    local app_path="/usr/share/applications/$app"
+    local mimes
+    if [[ -f "$app_path" ]]; then
+        log_warn "set_office(): $app não encontrado. Associações ignoradas."
+        return 0
+    fi
+    mimes=(
+	    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/msword"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "application/vnd.ms-excel"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "application/vnd.ms-powerpoint"
+    )
+
+    for mime in "${mimes[@]}"; do
+        xdg-mime default "$app" "$mime"
+    done
+    [[ -d "$HOME/.local/share/mime" ]] && update-mime-database "$HOME/.local/share/mime" > /dev/null 2>&1
+}

@@ -1,49 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# user-menu v1.07 - 2025-12-12
+# user-menu v1.1 - 2026-03-24
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-source "$PROJECT_ROOT/lib/aevh-tools.sh"
-
-getroot "$@"
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
 TITLE="Gestão de utilizadores"
-MENU="Escolha a ação"
-MSG="Esta operação vai APAGAR todos os dados locais do utilizador\n
-e repor as definições originais.\n\n
-Continuar?"
-MANAGE="$AEVH_BIN/user-manage"
+MSG_CONFIRM="Esta operação vai APAGAR todos os dados locais do utilizador e repor as definições originais.\n\nContinuar?"
+MANAGE="${AEVH_BIN:-/opt/aevh/bin}/user-manage"
 
-while true; do
-    OPT=$(dialog --title "$TITLE" --menu "$MENU" 0 0 10 \
-        1 "Reset do aluno"\
-        2 "Salvar o perfil do aluno"\
-		3 "Reset do professor"\
-        4 "Salvar o perfil do professor"\
-        0 "Sair" \
-    3>&1 1>&2 2>&3)
-    RET=$?
-    [[ $RET -ne 0 || "$OPT" == "0" ]] && { clear; exit 0; }
-    case $OPT in
-        1)  if confirm "$MSG" "Atenção"; then
-                "$MANAGE" reset aluno 
-	        	usermod -c "Aluno" aluno
-	    	else
-	        	warn "Operação cancelada pelo utilizador"
-	    	fi
-		;;
-		2)  "$MANAGE" save aluno ;;
-        3)  if confirm "$MSG" "Atenção"; then
-                "$MANAGE" reset professor 
-	    	    usermod -c "Professor" professor
-	    	else
-	        	warn "Operação cancelada pelo utilizador"
-	    	fi
-		;;
-        4) "$MANAGE" save professor  ;;
+run_user_action() {
+    local action="${1:-}" user="${2:-}" label="${3:-}"
+    
+    case "$action" in
+        reset)
+            if confirm "$MSG_CONFIRM" "Atenção: Reset $user"; then
+                "$MANAGE" reset "$user"
+                usermod -c "$label" "$user"
+                dialog --title "Sucesso" --msgbox "O utilizador $user foi reposto." 6 45
+            else
+                log_info "Reset de $user cancelado pelo administrador."
+            fi
+            ;;
+        save)
+            "$MANAGE" save "$user"
+            dialog --title "Sucesso" --msgbox "Perfil de $user guardado com sucesso." 6 45
+            ;;
     esac
-    echo ""
-    keywait
-done
+}
+
+main() {
+    getroot "$@"
+    local opt
+    while true; do
+        if ! opt=$(dialog --title "$TITLE" --menu "Escolha a ação para os perfis locais:" 15 55 5 \
+            1 "Reset do aluno" \
+            2 "Salvar o perfil do aluno" \
+            3 "Reset do professor" \
+            4 "Salvar o perfil do professor" \
+            0 "Sair" 3>&1 1>&2 2>&3); then
+            log_bye "Menu encerrado"
+        fi
+
+        case $opt in
+            1) run_user_action reset aluno "Aluno" ;;
+            2) run_user_action save aluno "" ;;
+            3) run_user_action reset professor "Professor" ;;
+            4) run_user_action save professor "" ;;
+            0) log_bye "Saída selecionada." ;;
+        esac
+    done
+}
+
+main "$@"

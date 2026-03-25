@@ -1,25 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shutdown-spread v1.02 - 2025-11-22
+# shutdown-spread v1.03 - 2026-03-24
 # Agenda um comando de shutdown para um valor aleatório
 # O pré-definido é entre 15 e 29 minutos [15, 30[
 
-START="${1:-15}"
-DELTA="${2:-15}"
+main() {
+    local start="${1:-15}" delta="${2:-15}" min
 
-if ! [[ "$START" =~ ^[0-9]+$ ]]; then
-    START=15
-    echo "Erro: O primeiro parâmetro deve ser um número inteiro."
-    echo "Valor ajustado para 15."
-fi
+    [[ ! "$start" =~ ^[0-9]+$ ]] && start=15 || true
+    [[ ! "$delta" =~ ^[0-9]+$ ]] || [[ "$delta" -eq 0 ]] && delta=15 || true
+    min=$(( 10#$start + (RANDOM % 10#$delta)))
+    echo "Encerramento agendado para daqui a ${min} minutos."
+    /usr/sbin/shutdown -h +"$min"
+}
 
-if ! [[ "$DELTA" =~ ^[0-9]+$ ]] || [ "$DELTA" -le 0 ]; then
-    DELTA=15
-    echo "Erro: O segundo parâmetro deve ser um número inteiro maior que zero."
-    echo "Valor ajustado para 15."
-fi
-
-RND=$(/usr/bin/shuf -i 0-32768 -n 1)
-MIN=$(( START + (RND % DELTA)))
-/usr/sbin/shutdown -h +"$MIN"
+main "$@"

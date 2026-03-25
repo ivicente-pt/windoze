@@ -1,40 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# auto-apt-proxy v1.05 - 2025-12-11
+# auto-apt-proxy v1.1 - 2026-03-24
 # Definir o proxy para usar com o apt, se estiver disponível
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-source "$PROJECT_ROOT/lib/aevh-tools.sh"
+# Nota:
+# é preciso usar a diretiva "PassThroughPattern: .*" no ficheiro acng.conf no apt-cacher-ng
 
-getroot "$@"
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
-# Lista de proxies
-APTPROXIES=(
-	"10.115.201.230:3142"
-	"10.115.201.231:3142"
-)
-# Ficheiro de configuração do proxy para apt
-PROXYCONF="/etc/apt/apt.conf.d/02-apt-proxy.conf"
+main() {
+	getroot "$@"
 
-[[ -e "$PROXYCONF" && ! -w "$PROXYCONF" ]] && \
-    fatal "Não tenho permissão de escrita em $PROXYCONF"
+	local ip port proxy proxyconf="/etc/apt/apt.conf.d/02-apt-proxy.conf"
+	local apt_proxies=(
+		"10.115.201.230:3142"
+		"10.115.201.231:3142"
+	)
 
-# Tenta definir um proxy
-info "A procurar um proxy APT disponível..."
-for PROXY in "${APTPROXIES[@]}"; do
-    IP="${PROXY%%:*}"
-    PORT="${PROXY##*:}"
-    if test_port "$IP" "$PORT"; then
-		{
-			echo "Acquire::http::Proxy \"http://$IP:$PORT\";"
-			echo "Acquire::https::Proxy \"http://$IP:$PORT\";"
-		} > "$PROXYCONF"
-		info "Proxy configurado com sucesso: $IP:$PORT"
-		exit 0
-    fi
-    warn "Proxy $IP:$PORT não respondeu"
-done
-warn "Nenhum proxy APT disponível"
-[[ -f "$PROXYCONF" ]] && { rm "$PROXYCONF"; info "APT em ligação direta"; }
+	log_info "A procurar um proxy APT disponível..."
+	for proxy in "${apt_proxies[@]}"; do
+		ip="${proxy%%:*}"
+		port="${proxy##*:}"
+		if test_port "$ip" "$port"; then
+			{
+				echo "Acquire::http::Proxy \"http://$ip:$port\";"
+				echo "Acquire::https::Proxy \"http://$ip:$port\";"
+			} > "$proxyconf"
+			log_bye "Proxy configurado com sucesso: $ip:$port"
+		fi
+		log_info "Proxy $ip:$port não respondeu"
+	done
+	log_warn "Nenhum proxy APT disponível"
+	[[ -f "$proxyconf" ]] && rm -f "$proxyconf"
+	log_info "APT em ligação direta."
+}
+
+main "$@"
