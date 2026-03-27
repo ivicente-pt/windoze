@@ -1,321 +1,210 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# windoze v1.5 2026-03-24
-
-# Funções
-#   enable_repos()
-#   install_master()
-#   install_konica()
-#   optimize()
-#   install_base()
-
-#   install_wine()
-#   install_lightdm()
-#   install_gui()
-
-#   install_ocs()
-#   install_crontab()
-#   install_logrotate()
-
-#   install_themes()
-#   splash_test()
-#   install_splash()
-
-#   install_debfile()
-#   install_browsers()
-#   install_office()
-#   install_ysoft()
-#   remove_chrome()
-#   remove_onlyoffice()
-#   remove_ysoft()
-#   remove_lightdm()
-#   remove_gui()
-#   remove_ocs()
-#   remove_crontab()
-#   remove_themes()
-#   remove_splash()
-#   purge()
-#   usage()
-#   install_users()
+# windoze v1.6 2026-03-24
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
-# Habilita repositórios
-enable_repos() {
-    local list="/etc/apt/sources.list" dst="/etc/apt/sources.list.d/aevh-sources.list" src=""
-    is_debian12 && src="$AEVH_CONF/apt/bookworm.list"
-    is_debian13 && src="$AEVH_CONF/apt/trixie.list"
-    [[ -z "$src" ]] && { log_warn "SO não reconhecido"; return 1; }
-    [[ ! -f "$src" ]] && { log_warn "Ficheiro não encontrado: $src"; return 1; }
-    mkdir -p "$(dirname "$dst")"
-    cp "$src" "$dst"
-    echo "# O conteúdo foi movido para $dst" > "$list"
+PKG_BASE=(
+        sudo fail2ban btop htop p7zip-full unrar-free pigz localepurge rsync earlyoom
+        zram-tools xcape molly-guard numlockx openssh-server wget curl dialog unattended-upgrades jq
+        alsa-utils cups bleachbit
+    )
+PKG_GUI=(
+        ttf-mscorefonts-installer vlc libnotify-bin libglib2.0-bin fonts-noto-color-emoji
+        task-xfce-desktop xfce4 xfce4-goodies xfce4-whiskermenu-plugin fonts-croscore
+        gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles plank dbus-x11
+        gnome-calculator xfconf xfce4-power-manager bleachbit mugshot
+        mesa-utils picom
+    )
+PKG_WINE=( wine wine64-tools winetricks wine-binfmt binfmt-support wine32 wine32-preloader )
+PKG_DM=( lightdm slick-greeter lightdm-settings )
+PKG_OFFICE=( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
+PKG_BROWSERS=( firefox-esr firefox-esr-l10n-pt-pt chromium )
+PKG_THEMES=( libsass1 sassc )
+PKG_PRINT=( cups )
+PKG_OCS=( ocsinventory-agent )
+
+generate_apt_list() {
+    version="${1:-}"
+    [[ "$version" != "bookworm" && "$version" != "trixie" ]] && return 1
+    cat << EOF
+deb http://deb.debian.org/debian/ "${version}" main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian/ "${version}" main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security "${version}"-security main contrib non-free non-free-firmware
+deb-src http://security.debian.org/debian-security "${version}"-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian/ "${version}"-updates main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian/ "${version}"-updates main contrib non-free non-free-firmware
+EOF
+}
+
+generate_unattended_upgrades() {
+    version="${1:-}"
+    [[ "$version" != "bookworm" && "$version" != "trixie" ]] && return 1
+    cat << EOF
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${version}-security,label=Debian-Security";
+    "origin=Debian,codename=${version},label=Debian-Security";
+    "origin=Debian,codename=${version},label=Debian";
+    "origin=Debian,codename=${version}-updates,label=Debian";
+};
+
+Unattended-Upgrade::Package-Blacklist {
+};
+
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::InstallOnShutdown "true";
+EOF
+}
+
+generate_crontab() {
+    cat << EOF
+17 */2    *         *   * /opt/aevh/bin/auto-apt-proxy
+29  17    *         *   * /opt/aevh/bin/shutdown-spread
+59  18,23 *         *   * /opt/aevh/bin/shutdown-spread
+*    *    *         *   * /opt/aevh/bin/shutdown-notify
+15  09    *         * 6,7 /opt/aevh/bin/shutdown-spread 5
+16  09    1 1,5,11,12   * /opt/aevh/bin/shutdown-spread 5
+16  09   25      4,12   * /opt/aevh/bin/shutdown-spread 5
+16  09    5        10   * /opt/aevh/bin/shutdown-spread 5
+16  09    8	       12   * /opt/aevh/bin/shutdown-spread 5
+16  09   10         6   * /opt/aevh/bin/shutdown-spread 5
+00 */4    *         8   * /opt/aevh/bin/shutdown-spread 5
+EOF
+}
+
+setup_repos() {
+    local list="/etc/apt/sources.list" debian="${1:-}"
+    log_info "A configurar repositórios"
+    [[ "$debian" != "bookworm" && "$debian" != "trixie" ]] && log_critical "Versão não suportada: $debian"
+    make_file_backup "$list"
+    generate_apt_list "$debian" > "$list"
     log_info "A atualizar repositórios"
-    apt_update
+    apt_update && log_info "Repositórios configurados"
 }
 
-# Cria e configura o utilizador master
-install_master() {
-    local user="master" pass_file="$AEVH_DATA/user/master.psw" groups="sudo,plugdev,netdev,audio,video"
-    if id -u "$user" >/dev/null 2>&1; then 
-        log_info "O utilizador $user já existe. A atualizar grupos..."
-        usermod -aG "$groups" "$user" 2>/dev/null
-    else
-        [[ ! -f "$pass_file" ]] && { log_error "Ficheiro de password não encontrado: $pass_file"; return 1; }
-        if useradd -m -s /bin/bash -G "$groups" "$user"; then
-            echo "$user:$(<"$pass_file")" | chpasswd -e
-            log_info "Utilizador criado: $user"
-        else
-            log_error "Falha ao criar utilizador: $user"
-            return 1
-        fi
-    fi
-    local home
-    home=$(get_home "$user")
-    [[ -z "$home" ]] && { log_error "Não foi possível determinar a home do $user"; return 1; }
-    # Desktop
-    local desktop=""
-    if command -v xdg-user-dir >/dev/null 2>&1; then
-        runuser -u "$user" -- xdg-user-dirs-update
-        desktop=$(runuser -u "$user" -- xdg-user-dir DESKTOP)
-    fi
-    if [[ -z "$desktop" || "$desktop" == "$home" ]]; then
-        desktop="$home/Desktop"
-        mkdir -p "$desktop"
-    fi
-    if [[ "$desktop" != "$home/Desktop" ]]; then
-        if [[ ! -e "$home/Desktop" ]]; then
-            ln -s "$desktop" "$home/Desktop"
-            chown -h "$user:$user" "$home/Desktop"
-        fi
-    fi
-    copy_check "$AEVH_DATA/desktop/Windoze.desktop" "$desktop/"
-    # Applications
-    local apps="$home/.local/share/applications"
-    mkdir -p "$apps"
-    compgen -G "$AEVH_DATA/desktop/*.desktop" > /dev/null && \
-        for f in "$AEVH_DATA/desktop/"*.desktop; do
-            copy_check "$f" "$apps/"
-        done
-    # Permissões
-    chown "$user:$user" "$desktop"
-    chown -R "$user:$user" "$desktop" "$home/.local"
-    log_info "Utilizador $user configurado"
-}
-
-install_konica() {
-    # Drivers Konica-minolta
-    # A instalação é interativa, tenho de a tornar automática
-    #pushd "$AEVH_DATA"/km-ppd/
-    #info_exec "A instalar os drivers da Konica" perl install.pl
-    #systemctl restart cups
-    #popd
-    pushd "$AEVH_DATA"/km-ppd/ > /dev/null
-    local filter_dir="/usr/lib/cups/filter"
-    local ppd_dir="/usr/share/cups/model/KonicaMinolta"
-    local ppd="KMbeuC35ux.ppd"
-    mkdir -p "$filter_dir"
-    copy_check KMbeuEmpPS.pl "$filter_dir/"
-    copy_check KMbeuEnc.pm "$filter_dir/"
-    chmod 755 "$filter_dir"/KMbeu*
-    chown root:root "$filter_dir"/KMbeu*
-    mkdir -p "$ppd_dir"
-    copy_check "$ppd" "$ppd_dir"
-    chmod 644 "$ppd_dir"/*.ppd
-    systemctl restart cups
-#    lpadmin -p Konica_Minolta -v sqport://10.0.0.6 -E -m KonicaMinolta/$ppd
-    popd
-    
-    # https://docs.ysoft.cloud/safeq6/latest/safeq6/configuring-ysoft-safeq-as-a-printer-at-linux-work
-    #PRINTER="YSoftSafeQ6"
-    #
-    #sudo lpadmin -E -p "${PRINTER}" -v "ipps://safeq6.ysoft.local:8050/ipp/print" \
-    #    -m 'everywhere' \
-    #    -o 'printer-is-shared=false' \
-    #    -o 'auth-info-required=username,password'
-    #
-    #sudo cupsenable "${PRINTER}" -E
-    #sudo cupsaccept "${PRINTER}"
-}
-
-optimize() {
-    # preload
-    if [[ $(get_disk_type /) == "HDD" ]]; then 
-        apt_install preload
-        OVERRIDE_DIR="/etc/systemd/system/preload.service.d"
-        mkdir -p "$OVERRIDE_DIR"
-        copy_check "$AEVH_CONF/systemd/override.conf" "$OVERRIDE_DIR"
-    else
-        dpkg -s preload &> /dev/null && apt_cmd remove preload
-    fi
-
-    log_info "A configurar serviços systemd"
-    systemctl daemon-reload
-    systemctl restart --no-block preload
-
-    # Configurar serviços
-    systemctl disable --now NetworkManager-wait-online.service ModemManager.service 2>/dev/null
-    systemctl mask --now avahi-daemon.service avahi-daemon.socket e2scrub_reap.service 2>/dev/null
-    systemctl stop zramswap 2>/dev/null
-    copy_check "$AEVH_CONF/default/zramswap" /etc/default/
-    systemctl enable --now e2scrub_all.timer zramswap
-    sysctl vm.swappiness=10 >/dev/null
-    local sysctl="/etc/sysctl.conf"
-    [[ ! -f "$sysctl" ]] && touch "$sysctl" 
-    set_config_value "$sysctl" "vm.swappiness" 10
-
-    # NetworkManager-wait-online - não é preciso esperar por ligação à rede
-    # ModemManager - serve para gerir modems 3G/4G
-    # avahi-daemon avahi-daemon - serve para localizar partilhas na rede
-    # e2scrub - não precisa correr em todos os boot, só 1 vez por semana
-
-    # o bluetooth
-    #systemctl disable --now bluetooth.service
-  
-    # Logs
-    set_config_value "/etc/systemd/journald.conf" "SystemMaxUse" "50M"
-    set_config_value "/etc/systemd/journald.conf" "Storage" "volatile"
-    (
-        journalctl --vacuum-time=2d > /dev/null 2>&1
-        systemctl restart systemd-journald
-    ) &
-    sed -i 's/^MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
-    update-initramfs -u
-    log_info "Serviços otimizados"
-}
-
-# Instalar e atualizar os pacotes essenciais
 install_base() {
     log_info "A instalar a base do sistema"
-    local pkg_base=(
-        sudo fail2ban btop htop p7zip-full unrar-free pigz localepurge rsync earlyoom pipewire-audio zram-tools xcape
-        molly-guard numlockx openssh-server wget dialog unattended-upgrades jq espeak-ng alsa-utils cups bleachbit
-    )
-    [[ $(get_disk_type /) == "HDD" ]] && pkg_base+=(preload) 
-    # se ficar disponível no debian, acrescentar: boot-repair
-    info_exec "A configurar os repositórios" enable_repos
-    info_exec "A instalar debconf-utils" apt_install debconf-utils
+    debian="$(get_debian_version)"
+    setup_repos "$debian"
+    generate_unattended_upgrades "$debian" > /etc/apt/apt.conf.d/50unattended-upgrades
+    apt_install debconf-utils
     echo "unattended-upgrades unattended-upgrades/enable_auto_updates boolean true" | debconf-set-selections
     echo "localepurge localepurge/nopurge multiselect pt, pt_PT, pt_PT.UTF-8, en, en_US, en_US.UTF-8" | debconf-set-selections
     echo "localepurge localepurge/use-dpkg-feature boolean true" | debconf-set-selections
     echo "localepurge localepurge/mandelete boolean true" | debconf-set-selections
-    info_exec "A instalar pacotes base" apt_install "${pkg_base[@]}"
-    info_exec "A configurar o master" install_master
-    info_exec "A instalar drivers da Konica" install_konica
-    log_info "A configurar atualizações automáticas"
-    local upgrades="$AEVH_CONF/apt/50unattended-upgrades"
-    if [[ -f "$upgrades" ]]; then
-        copy_check "$upgrades" "/etc/apt/apt.conf.d/"
-    else
-        log_warn "Ficheiro $upgrades não encontrado. Usando predefinição."
-    fi
-    info_exec "A remover pacotes obsoletos" apt_cmd autopurge -y
-    info_exec "A otimizar o sistema" optimize
+    apt_install "${PKG_BASE[@]}"
+    apt_cmd autopurge
     log_info "Instalação base concluída."
 }
 
-
-# Install Wine
 install_wine() {
     log_info "A instalar subsistema Windows"
-    local pkg_wine=( wine wine64-tools winetricks wine-binfmt binfmt-support wine32 wine32-preloader )
     dpkg --add-architecture i386
     apt_update
-    apt_install "${pkg_wine[@]}"
+    apt_install "${PKG_WINE[@]}"
     update-binfmts --import wine >/dev/null 2>&1
     log_info "Subsistema Windows instalado"
 }
 
-# Instalar e configurar o lightdm
+copy_file_dir() {
+    local src="${1:-}" dst="${2:-}"
+    [[ -f "$src" ]] || return 0
+    [[ -f "$dst" ]] && return 1
+    mkdir -p "$dst" || return 1
+    cp -a "$src" "$dst" || return 1
+    return 0
+}
+
 install_lightdm(){
     echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
-    apt_install lightdm slick-greeter lightdm-settings
+    apt_install "${PKG_DM[@]}"
     mkdir -p /etc/lightdm/lightdm.conf.d
-    local src="$AEVH_CONF/lightdm"
-    if [[ -d "$src" ]]; then
-        log_info "A copiar configurações do LightDM..."
-        cp -a "$src/." /etc/lightdm/ || log_warn "Erro ao copiar configurações do LightDM"
-    else
-        log_warn "Pasta de configuração $src não encontrada. A usar predefinições."
-    fi
+    copy_file_dir "/opt/aevh/conf/lightdm/lightdm.conf" "/etc/lightdm"
+    copy_file_dir "/opt/aevh/conf/lightdm/slick-greeter.conf" "/etc/lightdm"
     echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
     DEBIAN_FRONTEND=noninteractive dpkg-reconfigure lightdm
     systemctl enable lightdm
     log_info "LightDM configurado com sucesso."
 }
 
-# Instalar a interface gráfica: Cinnamon ou XFCE
 install_gui() {
-    local pkg_gui=(
-        ttf-mscorefonts-installer vlc libnotify-bin libglib2.0-bin fonts-noto-color-emoji 
-    )
-    local pkg_gui_xfce4=(
-        task-xfce-desktop xfce4 xfce4-goodies xfce4-whiskermenu-plugin fonts-croscore 
-        gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles plank dbus-x11 
-        gnome-calculator xfconf xfce4-power-manager bleachbit mugshot 
-        mesa-utils picom 
-        # xfce4-docklike-plugin nemo nemo-fileroller
-    )
-    pkg_gui_cinnamon=( task-cinnamon-desktop )
-
-    if is_xfce4; then
-        pkg_gui+=( "${pkg_gui_xfce4[@]}" )
-        is_debian12 && pkg_gui+=( libgl1-mesa-glx )
-        is_debian13 && pkg_gui+=( libgl1 libglx-mesa0 )
-    else
-        pkg_gui+=( "${pkg_gui_cinnamon[@]}" )
-    fi
-
-    log_info "A instalar a interface gráfica..."
+    local pkg
+    is_debian12 && pkg=( libgl1-mesa-glx )
+    is_debian13 && pkg=( libgl1 libglx-mesa0 )
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
-    info_exec "A instalar os pacotes" apt_install "${pkg_gui[@]}"
-    install_wine
-    install_lightdm
+    apt_install "${PKG_GUI[@]}" "${pkg[@]}"
     log_info "Interface gráfica instalada com sucesso"
 }
 
-
-# Instalar o OCS Inventory agent
 install_ocs() {
     echo "ocsinventory-agent ocsinventory-agent/method select local" | debconf-set-selections
     echo "ocsinventory-agent ocsinventory-agent/server string localhost" | debconf-set-selections
-    info_exec "A instalar o OCS Inventory agent" apt_install ocsinventory-agent
-    local src="$AEVH_CONF/ocsinventory/ocsinventory-agent.cfg"
-    local dest="/etc/ocsinventory"
-    mkdir -p "$dest"
-    copy_check "$src" "$dest/"
+    apt_install "${PKG_OCS[@]}"
+    copy_file_dir "$AEVH_CONF/ocsinventory/ocsinventory-agent.cfg" "/etc/ocsinventory"
     command -v ocsinventory-agent >/dev/null && ocsinventory-agent --force >/dev/null 2>&1 &
+    log_info "OCS Inventory instalado"
 }
 
 # Instalar o crontab do root com as definições para encerrar ao fim do dia, fim de semana, etc
 install_crontab() {
-    log_info "A criar crontab de root"
-    local src="CONF/crontab.root"
-    [[ -f "$src" ]] && crontab -u root "$src"
-    # info_exec "A instalar cron.daily" cp "$AEVH_CONF/cron.daily"/* /etc/cron.daily/
+    log_info "A instalar o novo crontab"
+    local current_cron new_lines
+    uninstall_crontab
+    current_cron=$(crontab -l 2>/dev/null)
+    new_lines=$(generate_crontab)
+    if [[ -z "$current_cron" ]]; then
+        final_cron="$new_lines"
+    else
+        final_cron=$(printf "%s\n%s" "$current_cron" "$new_lines")
+    fi
+    echo "$final_cron" | crontab -
 }
 
-# Instala os temas e papel de parede
+download_file() {
+    local fname url="${1:-}" dir
+    [[ -z "$url" ]] && return 1
+    fname=$(basename "$url")
+    dir="$(mktemp -d)"
+    if ! wget --timeout=10 --tries=4 "$url" -O "$dir/$fname"; then
+        log_warn "Não consigo transferir $url"
+        return 1
+    fi
+    echo "$dir/$fname"
+    return 0
+}
+
+install_deb() {
+    local deb="${1:-}"
+    [[ -z "$deb" ]] && return 1
+    apt_install "$deb" || return 1
+    log_info "Sucesso: '$deb' instalado."
+    return 0
+}
+
+install_url() {
+    local url="${1:-}" fname
+    [[ -z "$url" ]] && return 1
+    fname="$(download_file "$url")" || return 1
+    install_deb "$fname" || return 1
+    return 0
+}
+
 install_themes() {
-    log_info "A configurar temas visuais"
     log_info "A instalar wallpapers"
+    local url tmp_dir theme_dir src="/opt/aevh/data/themes/Fluent.tgz"
     local bg_dst="/usr/share/backgrounds/Windoze"
     [[ -d "$bg_dst" || -L "$bg_dst" ]] && rm -rf "$bg_dst"
-    ln -sfn "$AEVH_DATA/wallpaper" "$bg_dst"
-    info_exec "A instalar dependências" apt_install libsass1 sassc
-    
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' RETURN
+    ln -sfn "/opt/aevh/data/wallpaper" "$bg_dst"
+    apt_install "${PKG_THEMES[@]}"
 
-    # Instalar o tema Fluent
-    local src="$AEVH_DATA/themes/Fluent.tgz"
+    tmp_dir=$(mktemp -d)
+#    trap 'rm -rf "$tmp_dir"' RETURN
+
     if [[ -f "$src" ]]; then
-        info_exec "A instalar tema Fluent" tar xzf "$src" -C "$tmpdir"
-        local theme_dir="$tmpdir"/Fluent
-        
+        tar xzf "$src" -C "$tmp_dir"
+        theme_dir="$tmp_dir"/Fluent
         if [[ -n "$theme_dir" && -d "$theme_dir" ]]; then 
             log_info "A instalar Fluent..."
             pushd "$theme_dir" >/dev/null
@@ -326,340 +215,170 @@ install_themes() {
             log_warn "Não consegui instalar o tema Fluent"
         fi
     fi
-    
-    local wow64_url="https://github.com/luisrguerra/fluent11-icon-theme/releases/download/0.5.2/wow64-0.5.2.deb"
-    info_exec "A instalar ícones" install_deb "$wow64_url" wow64-icon-themes  
+
+    url="https://github.com/luisrguerra/fluent11-icon-theme/releases/download/0.5.2/wow64-0.5.2.deb"
+    pkg_installed wow64-icon-themes || install_url "$url"
     chmod -R a+r /usr/share/themes
     chmod -R a+r /usr/share/icons
     chmod -R a+r /usr/share/backgrounds
 }
 
-# Instala o boot splash do Win10
-install_splash() {
-    log_info "A instalar animação de boot"
-    apt_install plymouth plymouth-themes plymouth-x11
-    local tmpdir osid
-    tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' RETURN
-    
-    local src="$AEVH_DATA/plymouth/win10.tar.gz"
-    local dest="/usr/share/plymouth/themes"
-    log_info "A configurar plymouth"
-    GRUB_FILE="/etc/default/grub"
-    
-    if is_hp7800; then
-        local file="/etc/initramfs-tools/modules"
-        local module="i915"
-        if ! grep -Fxq "$module" "$file"; then
-            echo "$module" >> "$file"
-        fi
-    fi
-    
-    if [[ -d "$dest"/win10 ]]; then
-        log_info "Plymouth Win10 já instalado"
-    else
-        mkdir -p "$tmpdir/plymouth"
-        tar xzf "$src" -C "$tmpdir/plymouth"
-        warn_ok_exec "Não consegui instalar o tema plymouth" \
-            "Tema plymouth instalado" \
-            mv "$tmpdir"/plymouth/*/ "$dest"
-    fi
-    
-    check "Não foi possível entrar no diretório $dest/win10" cd "$dest"/win10
-    if [[ ! -f "/etc/initramfs-tools/conf.d/splash" ]] && [[ -f "splash" ]]; then cp splash /etc/initramfs-tools/conf.d/splash; fi
-
-    # reduzir timeout do grub e ligar quiet splash
-    set_config_value "$GRUB_FILE" "GRUB_TIMEOUT" "0"
-    if ! grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=".*splash.*"$' "$GRUB_FILE"; then
-        log_info "O parâmetro 'splash' NÃO está presente em GRUB_CMDLINE_LINUX_DEFAULT. A adicionar..."
-        # Adicionar 'splash' preservando outras opções
-        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\([^"]*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 quiet splash"/' "$GRUB_FILE"
-    fi
-    warn_ok_exec "Falha ao atualizar o GRUB." "GRUB atualizado com sucesso." update-grub
-    
-    osid=$(get_config_value "/etc/os-release" "ID")
-    if [[ "$osid" == "linuxmint" ]]; then
-        update-alternatives --install "$dest/default.plymouth" default.plymouth "$dest/win10/win10.plymouth" 100
-        update-alternatives --set default.plymouth "$dest/win10/win10.plymouth"
-    else
-    	check "Erro ao definir o tema do Plymouth: win10" plymouth-set-default-theme -R win10
-    fi
-    splash_test
-    update-initramfs -u
-}
-
-# mostra o splash durante 10 segundos
-splash_test() {
-    log_info "A executar um teste de splash de 10 segundos..."
-    plymouthd
-    plymouth --show-splash
-    for ((I=0; I<10; I++)); do
-        sleep 1
-        plymouth --update=test$I --progress
-    done
-    plymouth --quit
-    reset
-}
-
-# Instalar um DEB $1=url para fazer o download, $2=nome do pacote instalado
-install_deb () {
-    [[ $# -ne 2 ]] && { log_error "install_debfile(): É preciso indicar dois parâmetros."; return 1; }
-    local url="$1"
-    local pkg="$2"
-    local debfile tmpdir tmpfile
-    debfile=$(basename "$url")
-    tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' RETURN
-    tmpfile="$tmpdir/$debfile"
-    
-    dpkg-query -s "$pkg">/dev/null 2>&1 && {  log_info "Pacote $pkg já instalado"; return 0; }
-    if ! wget --timeout=10 --tries=4 "$url" -O "$tmpfile"; then
-        log_warn "Não consigo transferir $url, continuando com ficheiro offline"
-        tmpfile="$AEVH_DATA/deb/$debfile"
-    fi
-    install_pkg "$tmpfile"
-    sleep 1
-    ! dpkg-query -s "$pkg" >/dev/null 2>&1 && { log_error "'$pkg' não ficou instalado corretamente."; return 1; }
-    log_info "Sucesso: '$pkg' instalado."
-}
-
-# Instala o Browser: Firefox e Chrome
 install_browsers() {
     log_info "A instalar browsers"
-    apt_install firefox-esr firefox-esr-l10n-pt-pt
-    local chrome_url="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-    install_deb "$chrome_url" google-chrome-stable
+    apt_install "${PKG_BROWSERS[@]}"
+    # local chrome_url="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+    # install_deb "$chrome_url" google-chrome-stable
 }
 
 # Instala o Office: OnlyOffice
 install_office() {
     log_info "A instalar Office"
-    apt_install libreoffice libreoffice-l10n-pt libreoffice-help-pt
+    apt_install "${PKG_OFFICE[@]}"
+    pkg_installed onlyoffice-desktopeditors && return 0
     local oo_url="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
-    install_deb "$oo_url" onlyoffice-desktopeditors
+    install_url "$oo_url"
 }
 
-# Instala o software do SafeQ
-install_ysoft() {
-    local src="$AEVH_DATA/ysoft"
-    [[ ! -d "$src" ]] && { log_error "Pasta $src não encontrada"; return 1; }
-    local debfiles=(
-    	"multiarch-support_2.27-3ubuntu1_amd64.deb"
-        "libgnome-keyring-common_3.12.0-1build1_all.deb"
-        "libgnome-keyring0_3.12.0-1build1_amd64.deb"
-        "libcrafter_0.0.3_amd64.deb"
-    # Estes são precisos no Debian 13?
-    #	"libicu67_67.1-7_amd64.deb"
-    #	"libwebp6_0.6.1-2.1+deb11u2_amd64.deb"
-    #	"libqt5webkit5_5.212.0~alpha4-11_amd64.deb"
-    #   "libqt5webkit5-fixed.deb"
-        "ysoft-client_4.2_amd64.deb"
-    )
-    log_info "A instalar YSoft SafeQ"
-    apt_install cups
-    for deb in "${debfiles[@]}"; do
-        install_debfile "$src/$deb"
-    done
-    apt_fix
-    if [[ -n "$DISPLAY" ]]; then 
-	log_info "A iniciar configuração gráfica"
-	xhost local:root >/dev/null 2>&1
-	if command -v dialog >/dev/null 2>&1; then
-	    dialog --title "SafeQ" --msgbox "1. Adicionar a impressora sqport://10.0.0.6\n2. Usar o driver Bizhub\n3. Desligar encriptação" 0 0
-	fi
-       if command -v ysoft-client-settings >/dev/null; then
-           ysoft-client-settings
-        else
-            log_warn "Executável 'ysoft-client-settings' não encontrado."
-        fi
-        xhost -local:root >/dev/null 2>&1
-    else	
-        log_warn "Ambiente gráfico não detetado. Configuração manual necessária:"
-        echo "   -> Adicionar impressora: sqport://10.0.0.6 (Driver Bizhub)"
-        echo "   -> Executar: ysoft-client-settings"
-        echo "   -> Desligar encriptação."
-    fi
-    keywait
-    log_info "É recomendado reiniciar o sistema."
+uninstall_browsers() {
+    remove_pkg google-chrome-stable "${PKG_BROWSERS[@]}"
+    local list="/etc/apt/sources.list.d/google-chrome.list"
+    [[ -f "$list" ]] || return 0
+    rm -f "$list"
 }
 
-# Apaga o Google chrome
-remove_chrome() {
-    log_info "A remover o Google Chrome"
-    remove_pkg google-chrome-stable
-    local repo_list="/etc/apt/sources.list.d/google-chrome.list"
-    [[ ! -f "$repo_list" ]] && return 0
-    rm -f "$repo_list"
-    log_info "Repositório do Google Chrome removido."
+uninstall_office() {
+    remove_pkg onlyoffice-desktopeditors "${PKG_OFFICE[@]}"
 }
 
-# Apaga o OnlyOffice
-remove_onlyoffice() { log_info "A remover OnlyOffice"; remove_pkg onlyoffice-desktopeditors; }
-
-# Apaga o software do SafeQ
-remove_ysoft() {
-    local pkgs=(
-        "ysoft-client" "libcrafter" "libgnome-keyring0" "libgnome-keyring-common"
-        # "multiarch-support"
-    )
-    for pkg in "${pkgs[@]}"; do
-        remove_pkg "$pkg"
-    done
-    log_info "A fazer uma limpeza"
-    apt_cmd autopurge -y
-    keywait
-    dialog --title SafeQ --msgbox "É preciso reemover manualmente a impressora SafeQ" 0 0
-}
-
-# Elimina o lightdm
-remove_lightdm() {
+uninstall_lightdm() {
     systemctl stop lightdm 2>/dev/null || true
     systemctl disable lightdm 2>/dev/null || true
-    apt_purge lightdm slick-greeter lightdm-settings && rm -rf /etc/lightdm/
+    apt_purge "${PKG_DM[@]}" && rm -rf /etc/lightdm/
 }
 
-# Eliminar a interface gráfica
-remove_gui() {
-    local pkg_gui=(
-    # Wine e Ferramentas Base
-        ttf-mscorefonts-installer wine wine64-tools winetricks wine-binfmt binfmt-support 
-        vlc libnotify-bin libglib2.0-bin fonts-noto-color-emoji wine32 wine32-preloader
-    
-    # Ambiente XFCE e Utilitários
-        task-xfce-desktop xfce4 xfce4-goodies xfce4-whiskermenu-plugin fonts-croscore 
-        gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles plank dbus-x11 
-        gnome-calculator xfconf xfce4-power-manager bleachbit mugshot 
-        mesa-utils libgl1-mesa-glx
-        # xfce4-docklike-plugin nemo nemo-fileroller
-    # Ambiente Cinnamon
-        task-cinnamon-desktop
-    )
-    apt_purge "${pkg_gui[@]}"
-    remove_lightdm
-    apt_cmd autoremove
+uninstall_gui() {
+    apt_purge "${PKG_GUI[@]}"
 }
 
-# Eliminar o OCS Inventory agent
-remove_ocs() {
-    apt_purge ocsinventory-agent
-    rm -rf /etc/ocsinventory
-    rm -rf /var/lib/ocsinventory-agent
+uninstall_ocs() {
+    apt_purge "${PKG_OCS]}"
+    rm -rf /etc/ocsinventory /var/lib/ocsinventory-agent
 }
 
-# Elimina o crontab do root
-remove_crontab() {
-    crontab -r 2>/dev/null
+uninstall_crontab() {
+    local current to_remove updated
+    current=$(crontab -l 2>/dev/null)
+    [[ -z "$current" ]] && return 0
+    to_remove="$(generate_crontab)"
+    [[ -z "$to_remove" ]] && return 0
+    updated=$(echo "$current" | grep -vFx "$to_remove")
+    if [[ -z "$updated" ]]; then
+        crontab -r 2>/dev/null
+    else
+        echo "$updated" | crontab -
+    fi
 }
 
 # Remove os temas e papel de parede
-remove_themes() {
-    apt_purge wow64-icon-themes  
-    rm -rf /usr/share/themes/Fluent
-    rm -rf /usr/share/backgrounds/Windoze
-    apt_purge libsass1 sassc
+uninstall_themes() {
+    apt_purge wow64-icon-themes "${PKG_THEMES[@]}"
+    rm -rf /usr/share/themes/Fluent /usr/share/backgrounds/Windoze
     gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 }
 
-# Remove  o boot splash (plymouth)
-remove_splash() {
-    local file="/etc/initramfs-tools/modules" module="i915"
-    sed -i "/^$module$/d" "$file"
-
-    apt_purge plymouth plymouth-themes plymouth-x11
-    rm -rf /usr/share/plymouth/themes
-    rm -rf /etc/initramfs-tools/conf.d/splash
-
-    GRUB_FILE="/etc/default/grub"
-    set_config_value "$GRUB_FILE" "GRUB_TIMEOUT" "5"
-    if grep -q "splash" "$GRUB_FILE"; then
-        log_info "A remover parâmetro 'splash' do GRUB..."
-        sed -i -E 's/[[:space:]]*\bsplash\b//g' "$GRUB_FILE"
+optimize() {
+    local override_dir="/etc/systemd/system/preload.service.d"
+    if [[ "$(get_disk_type /)" == "HDD" ]]; then 
+        apt_install preload
+        mkdir -p "$override_dir"
+        copy_check "$/opt/aevh/conf/systemd/override.conf" "$override_dir"
+    else
+        dpkg_installed preload && apt_purge preload
     fi
-    #update-initramfs -u
-    update-grub
-}
 
-# Elimina pacotes não autorizados
-purge() {
-    log_info "A corrigir o sistema"
-    apt_fix
-    local pkg_del=(
-        "cheese*" "brasero*" "rhythmbox*" "sound-juicer*" "gnome-games" "hexchat*"
-        "pidgin*" "remmina*" "transmission*" "evolution" "thunderbird*" "simple-scan*"
-        "timeshift*" "popularity-contest" "installation-report" "task-mate-desktop"
-        "task-kde-desktop" "task-lxde-desktop" "task-lxqt-desktop" "rsyslog"
-        "gnome-shell" "gdm3" "task-cinnamon-desktop" "cinnamon"
-    )
-    log_info "A limpar pacotes não autorizados"
-    apt_cmd purge "${pkg_del[@]}" -y
-    clean_systeam
+    log_info "A configurar serviços systemd"
+    systemctl daemon-reload
+    systemctl restart --no-block preload
+
+    # Configurar serviços
+    systemctl disable --now NetworkManager-wait-online.service ModemManager.service 2>/dev/null
+    systemctl mask --now avahi-daemon.service avahi-daemon.socket e2scrub_reap.service 2>/dev/null
+
+    local zram_config="/etc/default/zramswap"
+    systemctl stop zramswap 2>/dev/null
+    set_config_value "$zram_config" "ALLOCATION_STRATEGY" "percent"
+    set_config_value "$zram_config" "PERCENT" "50"
+    set_config_value "$zram_config" "COMPRESSION_ALGORITHM" "lz4"
+    set_config_value "$zram_config" "PRIORITY" "100"
+    systemctl restart zramswap
+
+    local sys_file="/etc/sysctl.d/99-swappiness.conf"
+    mkdir -p "$(dirname "$sys_file")"
+    [[ ! -f "$sys_file" ]] && touch "$sys_file" 
+    set_config_value "$sys_file" "vm.swappiness" "10"
+    sysctl -p "$sys_file" >/dev/null
+
+    # NetworkManager-wait-online - não é preciso esperar por ligação à rede
+    # ModemManager - serve para gerir modems 3G/4G
+    # avahi-daemon avahi-daemon - serve para localizar partilhas na rede
+    # e2scrub - não precisa correr em todos os boot, só 1 vez por semana
+    # o bluetooth
+    #systemctl disable --now bluetooth.service
+  
+    # Logs
+    set_config_value "/etc/systemd/journald.conf" "SystemMaxUse" "50M"
+    set_config_value "/etc/systemd/journald.conf" "Storage" "volatile"
+    (
+        journalctl --vacuum-time=2d > /dev/null 2>&1
+        systemctl restart systemd-journald
+    ) &
+    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
+    update-initramfs -u
+    log_info "Serviços otimizados"
 }
 
 usage() {
     cat << EOF
-Uso: $(basename "$0") <comando> [parâmetro]
-Comandos Principais:
-  clean          Limpeza de sistema e correção do APT.
-  full           Instalação COMPLETA (Transforma Debian em Windoze).
-
-Gestão de Componentes:
-  install <componente>
-      Opções: base, gui, ocs, crontab, themes, splash, 
-              browsers, office, logrotate, ysoft, users
-
-  remove <componente>
-      Opções: gui, ocs, crontab, themes, splash, 
-              chrome, onlyoffice, ysoft
-
+Uso: $(basename "$0") <comando> [componente]
+Comandos:
+  install   [base, gui, ocs, crontab, themes, browsers, office, logrotate]
+  remove    [gui, ocs, crontab, themes, browsers, office, logrotate]
+  clean     Limpeza de sistema e correção do APT.
+  full      Instalação COMPLETA (Transforma Debian 12/13 em Windoze).
+  
 Exemplos:
   $(basename "$0") install gui
-  $(basename "$0") remove ysoft
+  $(basename "$0") remove themes
 EOF
     exit 1
 }
 
-# Faz o reset aos utilizadores
-install_users() {
-    local mgr="$AEVH_BIN/user-manage"
-    [[ ! -x "$mgr" ]] && { log_warn "$mgr não encontrado"; return 1; }
-    "$mgr" reset aluno
-    "$mgr" reset professor
-}
-
 main() {
-    local COMMAND="${1:-}" PARAM="${2:-}"
-    is_root && OPT="como root" || OPT="" 
-    log_info "A executar windoze $COMMAND $PARAM $OPT"
-    [[ -z "$COMMAND" ]] && usage
-    getroot "$COMMAND" "$PARAM"
-    case "$COMMAND" in
-        "clean") clean_system ;;
+    local comm="${1:-}" param="${2:-}"
+    [[ -z "$comm" ]] && usage
+    get_root
+    case "$comm" in
+#        "clean") clean_system ;;
         "install")
-            case "$PARAM" in
+            case "$param" in
                 "base") install_base ;;
                 "gui") install_gui ;;
                 "office") install_office ;;
                 "ocs") install_ocs ;;
                 "crontab") install_crontab ;;
                 "themes") install_themes ;;
-                "splash") install_splash ;;
                 "browsers") install_browsers ;;
-                "logrotate") install_logrotate ;;
-                "ysoft") install_ysoft ;;
-                "users") install_users ;;
-                *) log_error "$0 $1 $2 - Opção inválida" ;;
+                *) log_error "$0 $comm $param - Opção inválida" ;;
             esac
         ;;
         "remove")
-            case "$PARAM" in
-                "ysoft") remove_ysoft ;;
-                "chrome") remove_chrome ;;
-                "onlyoffice") remove_onlyoffice ;;
-                "gui") remove_gui ;;
-                "ocs") remove_ocs ;;
-                "crontab") remove_crontab ;;
-                "themes") remove_themes ;;
-                "splash") remove_splash ;;
+            case "$param" in
+                "browsers") uninstall_browsers ;;
+                "office") uninstall_office ;;
+                "gui") uninstall_gui ;;
+                "ocs") uninstall_ocs ;;
+                "crontab") uninstall_crontab ;;
+                "themes") uninstall_themes ;;
                 *) log_error "$0 $1 $2 - Opção inválida" ;;
             esac
         ;;
@@ -668,17 +387,15 @@ main() {
             install_gui
             install_ocs
             install_crontab
-        #	install_logrotate
             install_themes
             install_splash
             install_browsers
             install_office
-            [[ -x "$AEVH_BIN"/profile-menu ]] && "$AEVH_BIN"/profile-menu 
-            purge
+            optimize
             log_info "Instalação concluída"
             ;;
         *)
-            log_error "Comando desconhecido"
+            log_error "Comando desconhecido: $comm"
             usage
         ;;
     esac

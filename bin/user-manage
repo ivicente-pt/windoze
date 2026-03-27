@@ -254,7 +254,7 @@ EOF
 
 main() {
     [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    [[ "$#" -lt 2 ]] && { help; exit 0; }
+    [[ "$#" -lt 2 ]] && { usage; exit 0; }
     getroot "$@"
     local COMM="${1:-}" USER="${2:-}" FAST="${3:-}"
 

@@ -107,7 +107,7 @@ uninstallations() {
 }
 
 main () {
-    xhost local:root >/dev/null 2>&1
+    xhost local:root >/dev/null 2>&1 || true
     getroot "$@"
     PATH="$PATH:$AEVH_BIN"
     WINDOZE="$AEVH_BIN/windoze"
@@ -131,7 +131,7 @@ main () {
                 apt_update
                 apt_upgrade
                 apt_fix
-                info "Atualização concluída"
+                log_info "Atualização concluída"
                 keywait
             ;;
         "2") installations ;;                                   

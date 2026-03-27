@@ -15,7 +15,7 @@ readonly FONT="Arimo Regular 10"
 LOGO="distributor-logo-windows"
 
 set_xfce4_options() {
-    info "A aplicar as opções visuais do XFCE4"
+    log_info "A aplicar as opções visuais do XFCE4"
     
     xf_set() { xfconf-query -c "$1" -p "$2" -s "$3" --create -t "${4:-string}" || true; }
     

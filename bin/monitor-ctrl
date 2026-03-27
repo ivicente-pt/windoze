@@ -172,7 +172,8 @@ cmd_mirror() {
 }
 
 main() {
-    local cmd="${1,,}"
+    local cmd="${1:-}"
+    cmd="${cmd,,}"
 
     [[ -z "$cmd" || "$cmd" == "help" ]] && usage
     shift
