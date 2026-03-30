@@ -6,6 +6,9 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 # Definições visuais
 readonly WALLPAPER="/usr/share/backgrounds/Windoze/Win11.jpg"
 readonly XFWM="Default-hdpi"
@@ -14,57 +17,94 @@ readonly ICON="wow64-Light"
 readonly FONT="Arimo Regular 10"
 LOGO="distributor-logo-windows"
 
-set_xfce4_options() {
-    log_info "A aplicar as opções visuais do XFCE4"
+# flag
+readonly DONE_FILE="$HOME/.config/xfce4/windoze_setup_done"
+
+setup_xfce4_options() {
     
     xf_set() { xfconf-query -c "$1" -p "$2" -s "$3" --create -t "${4:-string}" || true; }
     
-    local prop properties key path
+    log_info "A aplicar as opções visuais do XFCE4"
+    local prop properties
+
+    xf_set "xfce4-desktop" "/backdrop" "" 2>/dev/null || true
     properties=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep "last-image$" || true)
     if [[ -z $properties ]]; then
-        log_warn "Nenhuma propriedade de monitor encontrada. O XFCE já iniciou?"
+        xf_set "xfce4-desktop" "/backdrop/screen0/monitor0/workspace0/last-image" "$WALLPAPER"
     else
         for prop in $properties; do
             xf_set "xfce4-desktop" "$prop" "$WALLPAPER"
         done
     fi
 
-    xf_set "xfwm4"          "/general/theme"        "$XFWM"
-    xf_set "xfwm4"          "/general/use_compositing" false    bool
-    xf_set "xsettings"      "/Net/ThemeName"        "$THEME"
-    xf_set "xsettings"      "/Net/IconThemeName"    "$ICON"
-    xf_set "xsettings"      "/Gtk/FontName"         "$FONT"
-    xf_set "xfce4-desktop"  "/desktop-icons/style"  2           int
-    
-    declare -A xdg_map=(
-        [DESKTOP]="$HOME/Área de Trabalho"
-        [DOWNLOAD]="$HOME/Transferências"
-        [TEMPLATES]="$HOME/Modelos"
-        [PUBLICSHARE]="$HOME/Público"
-        [DOCUMENTS]="$HOME/Documentos"
-        [MUSIC]="$HOME/Música"
-        [PICTURES]="$HOME/Imagens"
-        [VIDEOS]="$HOME/Vídeos"
-    )
-    for key in "${!xdg_map[@]}"; do
-        path="${xdg_map[$key]}"
-        [[ ! -d "$path" ]] && mkdir -p "$path"
-        xdg-user-dirs-update --set "$key" "$path"
-    done
-    xdg-user-dirs-update
-    
-    #xdg-mime default nemo.desktop inode/directory application/x-gnome-saved-search
-    # local panelsave="$AEVH_DATA/user/xfce4-panel-01.tar.bz2"
-    # local panelsave="$AEVH_DATA/user/xfce4-panel-02.tar.bz2"
-    # [[ -f "$panelsave" ]] && xfce4-panel-profiles load "$panelsave"
+    xf_set "xfwm4"          "/general/theme"            "$XFWM"
+    xf_set "xsettings"      "/Net/ThemeName"            "$THEME"
+    xf_set "xsettings"      "/Net/IconThemeName"        "$ICON"
+    xf_set "xsettings"      "/Gtk/FontName"             "$FONT"
+    xf_set "xfce4-desktop"  "/desktop-icons/style"      2           int
+    # desempenho
+    xf_set "xsettings"      "/Net/EnableEventSounds"    "false"     "bool"
+    xf_set "xfwm4"          "/general/box_resize"       "true"      "bool"
+    xf_set "xfwm4"          "/general/box_move"         "true"      "bool"
+    xf_set "xfwm4"          "/general/show_popup_shadow" "false"    "bool"
+    xf_set "xfwm4"          "/general/show_frame_shadow" "false"    "bool"
+    xf_set "thunar"         "/last-show-thumbnails"     "false"     "bool"
+    xf_set "xfce4-notifyd"  "/expire-timeout"           3           "int"
+
+    if [[ "$(get_ram_size)" -lt 2 ]]; then
+        xf_set "xfwm4"      "/general/use_compositing"  "false"     "bool"
+    else
+        xf_set "xfwm4"      "/general/use_compositing"  "true"      "bool"
+    fi
+
+    xdg-user-dirs-update --force
+}
+
+setup_xfce4_panel() {
+    local profile_path="$AEVH_DATA/user/xfce4-painel-02.tar.bz2"
+    [[ -f "$profile_path" ]] || return 1
+    (
+        export DISPLAY=${DISPLAY:-:0.0}
+        sleep 2
+        if xfce4-panel-profiles load "$profile_path" >/dev/null 2>&1; then
+            sleep 1
+             xfce4-panel -r >/dev/null 2>&1
+        fi
+    ) &
+}
+
+setup_xfce4_session() {
+    log_info "A forçar sessão XFCE para o utilizador $USER"
+    cat << EOF > "$HOME/.dmrc"
+[Desktop]
+Session=xfce
+EOF
+
+    echo "exec startxfce4" > "$HOME/.xsession"
+    chown "$USER:$USER" "$HOME/.dmrc" "$HOME/.xsession"
+}
+
+setup_flatpak() {
+    if command -v flatpak > /dev/null; then
+        flatpak override --user --filesystem=/media || true
+        flatpak override --user --filesystem=removable-media || true
+    fi
 }
 
 main() {
-    is_root && log_critical "Este script não deve ser executado como root nem com sudo."
-    set_xfce4_options
-    flatpak override --user --filesystem=/media || true
-    flatpak override --user --filesystem=removable-media || true
-    log_info "Configuração de utilizador concluída"
+    is_root && log_critical "Este script não deve ser executado como root nem com sudo!"
+    [[ -f "$DONE_FILE" ]] && exit 0
+    sleep 8
+    setup_xfce4_options
+    sleep 1
+    setup_xfce4_panel
+    sleep 1
+    setup_xfce4_session
+    sleep 1
+    setup_flatpak
+    mkdir -p "$(dirname "$DONE_FILE")"
+    touch "$DONE_FILE"
+    log_info "Configuração de utilizador concluída com sucesso: $USER"
 }
 
 main "$@"

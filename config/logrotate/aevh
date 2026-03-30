@@ -1,9 +1,0 @@
-/var/log/aevh.log {
-    daily
-    missingok
-    rotate 7
-    compress
-    delaycompress
-    notifempty
-    create 640 root root
-}

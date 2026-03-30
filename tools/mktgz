@@ -1,12 +1,26 @@
 #!/bin/bash
-# v 1.1-2 2025-11-23
-zip="-z"
+# v 1.2 2026-03-29
 
-if command -v pigz &> /dev/null; then
-    zip="--use-compress-program=pigz -9 --rsyncable"
-    echo "Usando pigz para compressão paralela."
-else
-    echo "pigz não encontrado. Usando gzip para compressão."
-fi
+error() {
+    echo "ERRO: $1"
+    exit 1
+}
 
-tar "${zip}" -cvf aevh.tgz aevh/
+main() {
+    local zip="-z" root="$HOME/git/windoze"
+    [[ -d "$root" ]] || error "Diretoria não encontrada: root"
+
+    command -v pigz &> /dev/null && zip="--use-compress-program=pigz -9 --rsyncable"
+    pushd "$root" || error "Não consigo entrar em $root"
+    [[ -d build/aevh ]] && rm -rf build/aevh
+    mkdir -p build/aevh/{bin,conf,static}
+    cp -aR bin/* build/aevh/bin/
+    cp -aR conf/* build/aevh/conf/
+    cp -aR static/* build/aevh/static/
+    cd build || error "Não consigo entrar em build"
+    tar "${zip}" -cvf windoze.tgz aevh/
+    rm -rf aevh
+    popd || error "Não consigo voltar à diretoria original"
+}
+
+main "$@"

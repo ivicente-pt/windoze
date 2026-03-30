@@ -6,10 +6,13 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 # Matar os processos do $user
 user_kill() {
     local user="${1:-}"
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
     pkill -u "$user" >/dev/null 2>&1
     sleep 1
     pkill -9 -u "$user" >/dev/null 2>&1
@@ -18,14 +21,10 @@ user_kill() {
 
 # Ativa o serviço de reposição do aluno no boot
 ativar_limpa_aluno() {
-    local serv="limpar-aluno.service"
-    local path="/opt/aevh/etc/systemd/$serv" dst="/etc/systemd/system/"
-    [[ $ICE_DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
+    local serv="limpar-aluno.service" path="$AEVH_CONF/systemd/$serv" dst="/etc/systemd/system/"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
     [[ ! -f "$path" ]] && { log_error "Serviço não encontrado: $path"; return 1; }
-    if ! copy_check "$path" "$dst"; then 
-        log_error "Erro a copiar o ficheiro do serviço"; 
-        return 1
-    fi
+    copy_check "$path" "$dst" || { log_error "Erro a copiar o ficheiro do serviço"; return 1; }
     systemctl daemon-reload
     if systemctl enable limpar-aluno.service; then
         log_info "Limpeza automática ativada com sucesso"
@@ -37,9 +36,8 @@ ativar_limpa_aluno() {
 
 # Desativa o serviço de reposição do aluno
 desativar_limpa_aluno() {
-    local serv="limpar-aluno.service"
-    local path="/etc/systemd/system/$serv"
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
+    local serv="limpar-aluno.service" path="/etc/systemd/system/$serv"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
     systemctl stop "$serv" 2>/dev/null
     if systemctl disable "$serv"; then
         if [[ -f "$path" ]]; then
@@ -57,13 +55,11 @@ desativar_limpa_aluno() {
 
 # Grava a pasta home do utilizador
 user_save() {
-    local user="${1:-}" tgz homedir mother child excludes next
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    ! id -u "$user" >/dev/null 2>&1 && log_critical "Utilizador $user não existe"
+    local user="${1:-}" tgz homedir mother child excludes
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    user_exists "$user" || log_critical "Utilizador $user não existe"
     tgz="$AEVH_DATA/user/$user.tgz"
-    # shellcheck disable=SC2155
     homedir=$(get_home "$user")
-    # shellcheck disable=SC2155
     mother=$(dirname "$homedir")
     child=$(basename "$homedir")
     [[ ! -d "$homedir" ]] && log_critical "Diretoria $homedir não existe"
@@ -76,20 +72,14 @@ user_save() {
             --exclude="$child/.wine"
             --warning=no-file-changed
         )
-
     log_info "A salvar o perfil de $user"
-        user_kill "$user"
+    user_kill "$user"
     if tar cpf "$tgz.new" -C "$mother" -I 'pigz -9' "${excludes[@]}" "$child"; then
-            log_info "Ficheiro $tgz criado com sucesso"
-        else
-            log_critical "Falha crítica ao criar $tgz"
-        fi
-    if [[ -f "$tgz.9" ]]; then rm "$tgz.9"; fi
-    for (( i=8; i>=1; i--)); do
-        next=$((i+1))
-        [[ -f "$tgz.$i" ]] && mv "$tgz.$i" "$tgz.$next" 
-    done
-    [[ -f "$tgz" ]] && mv "$tgz" "$tgz.1" 
+        log_info "Ficheiro $tgz criado com sucesso"
+    else
+        log_critical "Falha crítica ao criar $tgz"
+    fi
+    rotate_file_backup "$tgz" && rm "$tgz"
     if mv "$tgz.new" "$tgz"; then
         chown master:master "$tgz"
         log_info "Perfil de $user atualizado e backups rodados"
@@ -100,133 +90,106 @@ user_save() {
 
 # Elimina o utilizador $1
 user_del () {
-    local user="$1"
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    local user="${1:-}"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    user_exists "$user" || return 0
     log_info "A remover $user"
-    ! id -u "$user" >/dev/null 2>&1 && {
-        log_warn "Utilizador $user não encontrado (nada a remover)."
-        return 0
-    }
     user_kill "$user"
-    deluser --remove-home "$user" >/dev/null 2>&1 && { log_info "Utilizador $user removido"; return 0; }
-    userdel -r "$user" >/dev/null 2>&1 && { log_info "Utilizador $user removido (via userdel)."; return 0; }
-    log_warn "Falha crítica ao remover $user. (Processos presos?)"
-    return 1
+    deluser --remove-home "$user" >/dev/null 2>&1 || log_error "Falha ao remover $user."
+    user_exists "$user" && userdel -r "$user" >/dev/null 2>&1
+    return 0
 }
 
 # Adiciona o utilizador $1
 user_add () {
-    local pass passfile user="$1" groups
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    local pass passfile user="${1:-}" groups="audio,video,plugdev,floppy"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
     log_info "A adicionar $user"
+    [[ -z "$user" ]] && return 1
     passfile="$AEVH_DATA/user/$user.psw"
-    [[ ! -f "$passfile" ]] && { log_error "Ficheiro de password $passfile não encontrado"; return 1; }
+    [[ ! -f "$passfile" ]] && { log_error "Ficheiro de password não encontrado: $passfile"; return 1; }
 	pass=$(cat "$passfile")
     [[ -z "$pass" ]] && { log_error "O ficheiro de password está vazio"; return 1; }
-    groups="audio,video,plugdev,floppy"
-    getent group netdev >/dev/null && groups="$groups,netdev"
+    getent group netdev >/dev/null && groups+=",netdev"
     useradd -m -p "$pass" -c "${user^}" -s /bin/bash -G "$groups" "$user" || { log_warn "Não consegui adicionar o utilizador $user"; return 1; } 
     log_info "Utilizador $user criado"
     return 0
 }
 
 set_xfce_session() {
-    local user="$1" session_file session_name accounts_dir accounts_file user_home user_group dmrc_file
+    local user="${1:-}" user_home user_group dmrc_file session_name 
+    local session_file="/usr/share/xsessions/xfce.desktop" accounts_dir="/var/lib/AccountsService/users"
     [[ -z "$user" ]] && { log_error "set_xfce_session(): Nome de utilizador não fornecido." >&2; return 1; }
-    ! id "$user" &>/dev/null && { log_error "O utilizador '$user' não existe." >&2; return 1; }
-    session_file="/usr/share/xsessions/xfce.desktop"
+    user_exists "$user" || { log_error "O utilizador '$user' não existe." >&2; return 1; }
     [[ ! -f "$session_file" ]] && { log_error "Sessão XFCE não encontrada em $session_file. Instale o xfce4 primeiro." >&2; return 1; }
     session_name=$(basename "$session_file" .desktop)
-    echo "INFO: A configurar ambiente XFCE para $user..."
-    accounts_dir="/var/lib/AccountsService/users"
+    log_info "A configurar ambiente XFCE para $user..."
     accounts_file="$accounts_dir/$user"
     mkdir -p "$accounts_dir"
-    if [[ ! -f "$accounts_file" ]]; then
-        printf "[User]\nSession=%s\nXSession=%s\n" "$session_name" "$session_name" > "$accounts_file"
-    else
-        if ! grep -q "^\[User\]" "$accounts_file"; then
-            echo "[User]" >> "$accounts_file"
-        fi
-        if grep -q "^Session=" "$accounts_file"; then
-            sed -i "s/^Session=.*/Session=$session_name/" "$accounts_file"
-        else
-            sed -i "/\[User\]/a Session=$session_name" "$accounts_file"
-        fi
-        if grep -q "^XSession=" "$accounts_file"; then
-            sed -i "s/^XSession=.*/XSession=$session_name/" "$accounts_file"
-        else
-            sed -i "/\[User\]/a XSession=$session_name" "$accounts_file"
-        fi
-    fi
+    printf "[User]\nSession=%s\nXSession=%s\n" "$session_name" "$session_name" > "$accounts_file"
 
-    # Método 2: .dmrc (Legado/Fallback no Home do Utilizador)
-    user_home=$(getent passwd "$user" | cut -d: -f6)
+    user_home=$(get_home "$user")
     dmrc_file="$user_home/.dmrc"
     {
         echo "[Desktop]"
         echo "Session=$session_name"
     } > "$dmrc_file"
-    # CRÍTICO: Ajustar permissões (LightDM ignora .dmrc se tiver permissões erradas)
     user_group=$(id -gn "$user")
     chown "$user:$user_group" "$dmrc_file"
     chmod 644 "$dmrc_file"
 
-    if systemctl is-active --quiet accounts-daemon; then
-        systemctl restart accounts-daemon
-    fi
-
+    systemctl is-active --quiet accounts-daemon && systemctl restart accounts-daemon
     echo "SUCESSO: Ambiente de $user alterado para $session_name."
     return 0
 }
 
-# Repõe a pasta home do user $1
-user_restore() {
-    local user="$1" fast="$2" infile winefile homedir mother autostart
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    log_info "A repor o perfil do $user $fast"
+user_restore_fast() {
+    local user="${1:-}" infile homedir mother autostart
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    log_info "A repor o perfil do $user"
     infile="$AEVH_DATA/user/$user.tgz"
-    winefile="$AEVH_DATA/user/wine.tgz"
-    assert "Perfil $infile não encontrado" test -f "$infile"
+    [[ -f "$infile" ]] || { log_error "Perfil $infile não encontrado"; return 1; }
     homedir=$(get_home "$user")
     mother=$(dirname "$homedir")
     mkdir -p "$mother"
     user_kill "$user"
     rm -rf "$homedir"
-    check "Não consegui descomprimir $infile" tar xzf "$infile" -C "$mother" 
-    if [[ -z "$fast" && $user != "master" && -f "$winefile" ]]; then
-        check "Não consegui descomprimir os ficheiros do Wine." tar xzf "$winefile" -C "$homedir"
-    fi
-    check "Erro em chown $homedir" chown -R "$user":"$user" "$homedir"
-    mkdir -p "/media/$user" > /dev/null 
-    #chown "$user":"$user" "/media/$user"
-    #chmod 750 "/media/$user"
+    tar xzf "$infile" -C "$mother" || { log_error "Não consegui descomprimir $infile"; return 1; }
+    chown -R "$user":"$user" "$homedir"
     autostart="$homedir/.config/autostart"
     mkdir -p "$autostart"
     copy_check "$AEVH_DATA/desktop/monitor-mirror.desktop" "$autostart/"
     copy_check "$AEVH_DATA/desktop/user-options.desktop" "$autostart/"
-    if is_xfce4; then
-        #copy_check "/usr/share/applications/plank.desktop" "$autostart/"
-        copy_check "$AEVH_DATA/desktop/Picom.desktop" "$autostart/"
-    fi
+    copy_check "$AEVH_DATA/desktop/Picom.desktop" "$autostart/"
     set_xfce_session "$user"
-    chown -R "$user":"$user" "$homedir"
     log_info "Utilizador $user restaurado"
+}
+# Repõe a pasta home do user $1
+user_restore() {
+    local user="${1:-}" winefile homedir    
+    [[ -z "$user" ]] && return 1
+    log_info "A repor o perfil do $user"
+    winefile="$AEVH_DATA/user/wine.tgz"
+    homedir=$(get_home "$user")
+    tar xzf "$winefile" -C "$homedir" || log_error "Não consegui descomprimir os ficheiros do Wine."
+    chown -R "$user":"$user" "$homedir"
 }
 
 # Apaga e volta a criar o user $1
 user_reset() {
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    [[ "$#" -lt 1 ]] && { log_warn "user_reset(): Não foi indicado o utilizador"; return 1; } 
-    local user="$1" fast="$2"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    local user="${1:-}"
+    [[ -z "$user" ]] && { log_warn "user_reset(): Não foi indicado o utilizador"; return 1; } 
     user_del "$user" || { log_warn "user_reset(): Não consegui eliminar $user"; return 1; }
     user_add "$user" || { log_warn "user_reset(): Não consegui adicionar $user"; return 1; }
-    user_restore "$user" "$fast"
+    user_restore "$user"
 }
 
 # Definir temas visuais do $user
 user_set_options() {
     local user="${1:-}"
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    [[ -z "$user" ]] && return 0
     user_kill "$user"
     runuser -u "$user" -- dbus-launch --exit-with-session bash "$AEVH_BIN/user-options"
 }
@@ -253,9 +216,9 @@ EOF
 }
 
 main() {
-    [[ $ICE_DEBUG -eq 1 ]] && log "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
     [[ "$#" -lt 2 ]] && { usage; exit 0; }
-    getroot "$@"
+    get_root "$@"
     local COMM="${1:-}" USER="${2:-}" FAST="${3:-}"
 
     case "$COMM" in

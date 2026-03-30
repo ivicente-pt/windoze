@@ -6,6 +6,9 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 readonly PKG_EB1=( openboard )
 readonly FLAT_EB1=(
     org.gcompris.GCompris
@@ -178,7 +181,7 @@ perfil_biblioteca () {
 }
 
 main() {
-    getroot "$@"
+    get_root "$@"
     local opt title="Definir perfil da máquina"
     while true; do
         if ! opt=$(dialog --title "$title" --menu "Escolha o perfil pretendido:" 0 0 12 \
@@ -187,11 +190,10 @@ main() {
             "3" "Perfil: Sala de professores/DTs" \
             "4" "Perfil: Sala TIC (Alunos)" \
             "5" "Perfil: Biblioteca (Alunos)" \
-            "6" "Perfil: Limpeza (remove tudo)" \
-            "0" "Sair" 3>&1 1>&2 2>&3); then
+            "6" "Perfil: Limpeza (remove tudo)"  \
+            0 "Sair" 3>&1 1>&2 2>&3); then
             log_bye "Menu encerrado."
         fi
-        
         case $opt in
             "1") perfil_sala_eb1 ;;
             "2") perfil_sala_eb23s ;;
@@ -199,8 +201,8 @@ main() {
             "4") perfil_sala_tic ;;
             "5") perfil_biblioteca ;;
             "6") perfil_base ;;
+            "0") log_bye "Menu encerrado" ;;
         esac
-        
         dialog --title "Sucesso" --msgbox "Operação concluída com êxito!" 6 40
     done
 }

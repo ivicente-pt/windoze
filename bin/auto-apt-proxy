@@ -10,17 +10,16 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 main() {
-	getroot "$@"
+	get_root "$@"
 
 	local ip port proxy proxyconf="/etc/apt/apt.conf.d/02-apt-proxy.conf"
-	local apt_proxies=(
-		"10.115.201.230:3142"
-		"10.115.201.231:3142"
-	)
 
 	log_info "A procurar um proxy APT disponível..."
-	for proxy in "${apt_proxies[@]}"; do
+	for proxy in "${APT_PROXIES[@]}"; do
 		ip="${proxy%%:*}"
 		port="${proxy##*:}"
 		if test_port "$ip" "$port"; then

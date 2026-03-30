@@ -6,6 +6,9 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 PKG_BASE=(
         sudo fail2ban btop htop p7zip-full unrar-free pigz localepurge rsync earlyoom
         zram-tools xcape molly-guard numlockx openssh-server wget curl dialog unattended-upgrades jq
@@ -21,12 +24,14 @@ PKG_GUI=(
 PKG_WINE=( wine wine64-tools winetricks wine-binfmt binfmt-support wine32 wine32-preloader )
 PKG_DM=( lightdm slick-greeter lightdm-settings )
 PKG_OFFICE=( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
+FLAT_OFFICE=( org.onlyoffice.desktopeditors org.libreoffice.LibreOffice com.wps.Office com.collaboraoffice.Office )
 PKG_BROWSERS=( firefox-esr firefox-esr-l10n-pt-pt chromium )
 PKG_THEMES=( libsass1 sassc )
 PKG_PRINT=( cups )
 PKG_OCS=( ocsinventory-agent )
 
 generate_apt_list() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     version="${1:-}"
     [[ "$version" != "bookworm" && "$version" != "trixie" ]] && return 1
     cat << EOF
@@ -39,56 +44,73 @@ deb-src http://deb.debian.org/debian/ "${version}"-updates main contrib non-free
 EOF
 }
 
-generate_unattended_upgrades() {
-    version="${1:-}"
-    [[ "$version" != "bookworm" && "$version" != "trixie" ]] && return 1
-    cat << EOF
-Unattended-Upgrade::Origins-Pattern {
-    "origin=Debian,codename=${version}-security,label=Debian-Security";
-    "origin=Debian,codename=${version},label=Debian-Security";
-    "origin=Debian,codename=${version},label=Debian";
-    "origin=Debian,codename=${version}-updates,label=Debian";
-};
-
-Unattended-Upgrade::Package-Blacklist {
-};
-
-Unattended-Upgrade::Automatic-Reboot "false";
-Unattended-Upgrade::InstallOnShutdown "true";
-EOF
-}
-
-generate_crontab() {
-    cat << EOF
-17 */2    *         *   * /opt/aevh/bin/auto-apt-proxy
-29  17    *         *   * /opt/aevh/bin/shutdown-spread
-59  18,23 *         *   * /opt/aevh/bin/shutdown-spread
-*    *    *         *   * /opt/aevh/bin/shutdown-notify
-15  09    *         * 6,7 /opt/aevh/bin/shutdown-spread 5
-16  09    1 1,5,11,12   * /opt/aevh/bin/shutdown-spread 5
-16  09   25      4,12   * /opt/aevh/bin/shutdown-spread 5
-16  09    5        10   * /opt/aevh/bin/shutdown-spread 5
-16  09    8	       12   * /opt/aevh/bin/shutdown-spread 5
-16  09   10         6   * /opt/aevh/bin/shutdown-spread 5
-00 */4    *         8   * /opt/aevh/bin/shutdown-spread 5
-EOF
-}
-
 setup_repos() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local list="/etc/apt/sources.list" debian="${1:-}"
     log_info "A configurar repositórios"
     [[ "$debian" != "bookworm" && "$debian" != "trixie" ]] && log_critical "Versão não suportada: $debian"
-    make_file_backup "$list"
+    rotate_file_backup "$list"
     generate_apt_list "$debian" > "$list"
     log_info "A atualizar repositórios"
     apt_update && log_info "Repositórios configurados"
 }
 
+setup_master() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    local desktop apps home user="master"
+    local pass_file="$AEVH_DATA/user/master.psw" groups="sudo,plugdev,netdev,audio,video"
+    user_exists "$user"|| useradd -m -s /bin/bash -U "$user"
+    usermod -aG "$groups" "$user" 2>/dev/null
+    [[ -f "$pass_file" ]] && echo "$user:$(<"$pass_file")" | chpasswd -e
+    home="$(get_home "$user")"
+    [[ -z "$home" ]] && { log_error "Não foi possível determinar a home do $user"; return 1; }
+    apt_install xdg-user-dirs >/dev/null 2>&1
+    su -l "$user" -c "xdg-user-dirs-update --force"
+    desktop=$(su -l "$user" -c "xdg-user-dir DESKTOP")
+    copy_check "$AEVH_DATA/desktop/Windoze.desktop" "$desktop"
+    apps="$home/.local/share/applications"
+    mkdir -p "$apps"
+    compgen -G "$AEVH_DATA/desktop/*.desktop" > /dev/null && \
+        for f in "$AEVH_DATA/desktop/"*.desktop; do
+            copy_check "$f" "$apps"
+        done
+    chown -R "$user:$user" "$home"
+    log_info "Utilizador $user configurado"
+}
+
+setup_skeleton() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    log_info "A preparar o esqueleto (skel) do sistema..."
+
+    mkdir -p /etc/skel/.config/autostart
+    mkdir -p /etc/skel/.local/share/applications
+ 
+    cat << EOF > /etc/skel/.config/autostart/windoze-init.desktop
+[Desktop Entry]
+Type=Application
+Name=Windoze First Run
+Exec=/opt/aevh/bin/user-options
+Terminal=false
+Icon=distributor-logo-windows
+OnlyShowIn=XFCE;
+EOF
+
+    cat << EOF > /etc/skel/.dmrc
+[Desktop]
+Session=xfce
+EOF
+    chmod 644 /etc/skel/.dmrc
+}
+
 install_base() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar a base do sistema"
     debian="$(get_debian_version)"
     setup_repos "$debian"
-    generate_unattended_upgrades "$debian" > /etc/apt/apt.conf.d/50unattended-upgrades
+    setup_master
+    setup_skeleton
+    copy_check "$AEVH_CONF/apt/50unattended-upgrades" "/etc/apt/apt.conf.d"
+    apt_upgrade
     apt_install debconf-utils
     echo "unattended-upgrades unattended-upgrades/enable_auto_updates boolean true" | debconf-set-selections
     echo "localepurge localepurge/nopurge multiselect pt, pt_PT, pt_PT.UTF-8, en, en_US, en_US.UTF-8" | debconf-set-selections
@@ -100,6 +122,7 @@ install_base() {
 }
 
 install_wine() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar subsistema Windows"
     dpkg --add-architecture i386
     apt_update
@@ -108,21 +131,13 @@ install_wine() {
     log_info "Subsistema Windows instalado"
 }
 
-copy_file_dir() {
-    local src="${1:-}" dst="${2:-}"
-    [[ -f "$src" ]] || return 0
-    [[ -f "$dst" ]] && return 1
-    mkdir -p "$dst" || return 1
-    cp -a "$src" "$dst" || return 1
-    return 0
-}
-
-install_lightdm(){
+install_lightdm() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
     apt_install "${PKG_DM[@]}"
     mkdir -p /etc/lightdm/lightdm.conf.d
-    copy_file_dir "/opt/aevh/conf/lightdm/lightdm.conf" "/etc/lightdm"
-    copy_file_dir "/opt/aevh/conf/lightdm/slick-greeter.conf" "/etc/lightdm"
+    copy_safe "$AEVH_CONF/lightdm/lightdm.conf" "/etc/lightdm"
+    copy_safe "$AEVH_CONF/lightdm/slick-greeter.conf" "/etc/lightdm"
     echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
     DEBIAN_FRONTEND=noninteractive dpkg-reconfigure lightdm
     systemctl enable lightdm
@@ -130,6 +145,7 @@ install_lightdm(){
 }
 
 install_gui() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local pkg
     is_debian12 && pkg=( libgl1-mesa-glx )
     is_debian13 && pkg=( libgl1 libglx-mesa0 )
@@ -139,21 +155,23 @@ install_gui() {
 }
 
 install_ocs() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     echo "ocsinventory-agent ocsinventory-agent/method select local" | debconf-set-selections
     echo "ocsinventory-agent ocsinventory-agent/server string localhost" | debconf-set-selections
     apt_install "${PKG_OCS[@]}"
-    copy_file_dir "$AEVH_CONF/ocsinventory/ocsinventory-agent.cfg" "/etc/ocsinventory"
+    copy_safe "$AEVH_CONF/ocsinventory/ocsinventory-agent.cfg" "/etc/ocsinventory"
     command -v ocsinventory-agent >/dev/null && ocsinventory-agent --force >/dev/null 2>&1 &
     log_info "OCS Inventory instalado"
 }
 
 # Instalar o crontab do root com as definições para encerrar ao fim do dia, fim de semana, etc
 install_crontab() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar o novo crontab"
     local current_cron new_lines
     uninstall_crontab
-    current_cron=$(crontab -l 2>/dev/null)
-    new_lines=$(generate_crontab)
+    current_cron=$(crontab -l 2>/dev/null) || true
+    new_lines=$(cat $AEVH_CONF/crontab.root)
     if [[ -z "$current_cron" ]]; then
         final_cron="$new_lines"
     else
@@ -163,10 +181,12 @@ install_crontab() {
 }
 
 download_file() {
-    local fname url="${1:-}" dir
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    local fname url="${1:-}" dir="${2:-}"
     [[ -z "$url" ]] && return 1
     fname=$(basename "$url")
-    dir="$(mktemp -d)"
+    [[ -z "$dir" ]] && dir="$(mktemp -d)"
+    [[ -d "$dir" ]] || return 1
     if ! wget --timeout=10 --tries=4 "$url" -O "$dir/$fname"; then
         log_warn "Não consigo transferir $url"
         return 1
@@ -176,14 +196,16 @@ download_file() {
 }
 
 install_deb() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local deb="${1:-}"
-    [[ -z "$deb" ]] && return 1
+    [[ -z "$deb" || ! -f "$deb" ]] && return 1
     apt_install "$deb" || return 1
     log_info "Sucesso: '$deb' instalado."
     return 0
 }
 
 install_url() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local url="${1:-}" fname
     [[ -z "$url" ]] && return 1
     fname="$(download_file "$url")" || return 1
@@ -192,15 +214,15 @@ install_url() {
 }
 
 install_themes() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar wallpapers"
-    local url tmp_dir theme_dir src="/opt/aevh/data/themes/Fluent.tgz"
+    local url tmp_dir theme_dir src="$AEVH_DATA/themes/Fluent.tgz"
     local bg_dst="/usr/share/backgrounds/Windoze"
     [[ -d "$bg_dst" || -L "$bg_dst" ]] && rm -rf "$bg_dst"
-    ln -sfn "/opt/aevh/data/wallpaper" "$bg_dst"
+    ln -sfn "$AEVH_DATA/wallpaper" "$bg_dst"
     apt_install "${PKG_THEMES[@]}"
 
     tmp_dir=$(mktemp -d)
-#    trap 'rm -rf "$tmp_dir"' RETURN
 
     if [[ -f "$src" ]]; then
         tar xzf "$src" -C "$tmp_dir"
@@ -224,22 +246,27 @@ install_themes() {
 }
 
 install_browsers() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar browsers"
     apt_install "${PKG_BROWSERS[@]}"
-    # local chrome_url="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-    # install_deb "$chrome_url" google-chrome-stable
+#    local chrome_deb chrome_url="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+#    install_url "$chrome_url"
+
 }
 
 # Instala o Office: OnlyOffice
 install_office() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar Office"
     apt_install "${PKG_OFFICE[@]}"
     pkg_installed onlyoffice-desktopeditors && return 0
     local oo_url="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
     install_url "$oo_url"
+    flatpak install --system flathub "${FLAT_OFFICE[@]}"
 }
 
 uninstall_browsers() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     remove_pkg google-chrome-stable "${PKG_BROWSERS[@]}"
     local list="/etc/apt/sources.list.d/google-chrome.list"
     [[ -f "$list" ]] || return 0
@@ -247,31 +274,36 @@ uninstall_browsers() {
 }
 
 uninstall_office() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     remove_pkg onlyoffice-desktopeditors "${PKG_OFFICE[@]}"
 }
 
 uninstall_lightdm() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     systemctl stop lightdm 2>/dev/null || true
     systemctl disable lightdm 2>/dev/null || true
     apt_purge "${PKG_DM[@]}" && rm -rf /etc/lightdm/
 }
 
 uninstall_gui() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     apt_purge "${PKG_GUI[@]}"
 }
 
 uninstall_ocs() {
-    apt_purge "${PKG_OCS]}"
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    apt_purge "${PKG_OCS[@]]}"
     rm -rf /etc/ocsinventory /var/lib/ocsinventory-agent
 }
 
 uninstall_crontab() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local current to_remove updated
-    current=$(crontab -l 2>/dev/null)
+    current=$(crontab -l 2>/dev/null) || true
     [[ -z "$current" ]] && return 0
-    to_remove="$(generate_crontab)"
+    to_remove="$(cat $AEVH_CONF/crontab.root)"
     [[ -z "$to_remove" ]] && return 0
-    updated=$(echo "$current" | grep -vFx "$to_remove")
+    updated=$(echo "$current" | grep -vFx "$to_remove") || true
     if [[ -z "$updated" ]]; then
         crontab -r 2>/dev/null
     else
@@ -281,68 +313,108 @@ uninstall_crontab() {
 
 # Remove os temas e papel de parede
 uninstall_themes() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     apt_purge wow64-icon-themes "${PKG_THEMES[@]}"
     rm -rf /usr/share/themes/Fluent /usr/share/backgrounds/Windoze
     gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 }
 
-optimize() {
+auto_optimize_preload() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local override_dir="/etc/systemd/system/preload.service.d"
     if [[ "$(get_disk_type /)" == "HDD" ]]; then 
         apt_install preload
-        mkdir -p "$override_dir"
-        copy_check "$/opt/aevh/conf/systemd/override.conf" "$override_dir"
+        copy_safe "$AEVH_CONF/systemd/override.conf" "$override_dir"
+        systemctl restart --no-block preload
     else
-        dpkg_installed preload && apt_purge preload
+        pkg_installed preload && apt_purge preload
     fi
+}
 
-    log_info "A configurar serviços systemd"
-    systemctl daemon-reload
-    systemctl restart --no-block preload
-
-    # Configurar serviços
-    systemctl disable --now NetworkManager-wait-online.service ModemManager.service 2>/dev/null
-    systemctl mask --now avahi-daemon.service avahi-daemon.socket e2scrub_reap.service 2>/dev/null
-
+auto_optimize_zram() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local zram_config="/etc/default/zramswap"
     systemctl stop zramswap 2>/dev/null
-    set_config_value "$zram_config" "ALLOCATION_STRATEGY" "percent"
-    set_config_value "$zram_config" "PERCENT" "50"
-    set_config_value "$zram_config" "COMPRESSION_ALGORITHM" "lz4"
-    set_config_value "$zram_config" "PRIORITY" "100"
+    echo "ALLOCATION_STRATEGY=percent" > "$zram_config"
+    if [[ "$(get_cpu_benchmark_multithread)" -le 100 ]]; then
+        echo "PERCENT=50" >> "$zram_config"
+        echo "COMPRESSION_ALGORITHM=lz4" >> "$zram_config"
+    else
+        echo "PERCENT=60" >> "$zram_config"
+        echo "COMPRESSION_ALGORITHM=zstd" >> "$zram_config"
+    fi
+    echo "PRIORITY=100" >> "$zram_config"
     systemctl restart zramswap
 
     local sys_file="/etc/sysctl.d/99-swappiness.conf"
     mkdir -p "$(dirname "$sys_file")"
     [[ ! -f "$sys_file" ]] && touch "$sys_file" 
-    set_config_value "$sys_file" "vm.swappiness" "10"
+    set_config_value "$sys_file" "vm.swappiness" "100"
     sysctl -p "$sys_file" >/dev/null
+}
 
-    # NetworkManager-wait-online - não é preciso esperar por ligação à rede
-    # ModemManager - serve para gerir modems 3G/4G
-    # avahi-daemon avahi-daemon - serve para localizar partilhas na rede
-    # e2scrub - não precisa correr em todos os boot, só 1 vez por semana
-    # o bluetooth
-    #systemctl disable --now bluetooth.service
-  
-    # Logs
+auto_optimize_logs() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     set_config_value "/etc/systemd/journald.conf" "SystemMaxUse" "50M"
-    set_config_value "/etc/systemd/journald.conf" "Storage" "volatile"
+    if [[ $(get_ram_size) -le 2 ]]; then
+        set_config_value "/etc/systemd/journald.conf" "Storage" "persistent"
+    else
+        set_config_value "/etc/systemd/journald.conf" "Storage" "volatile"
+    fi
     (
         journalctl --vacuum-time=2d > /dev/null 2>&1
         systemctl restart systemd-journald
     ) &
+}
+
+auto_optimize_init() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
-    update-initramfs -u
+    update-initramfs -u >/dev/null 2>&1
+}
+
+optimize() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    log_info "A otimizar o sistema"
+    systemctl disable --now NetworkManager-wait-online.service ModemManager.service 2>/dev/null || true
+    systemctl mask --now avahi-daemon.service avahi-daemon.socket e2scrub_reap.service 2>/dev/null || true
+    auto_optimize_preload
+    systemctl daemon-reload
+    auto_optimize_zram
+    auto_optimize_logs
+    auto_optimize_init
     log_info "Serviços otimizados"
+}
+
+clean_system() {
+    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    apt_fix
+    apt_update
+    apt_purge
+    apt_upgrade
+    apt_cmd autoclean
+    journalctl --vacuum-time=2d >/dev/null 2>&1
+    command -v bleachbit >/dev/null || return 0
+    local user users options
+    users=$(find /home -maxdepth 1 -mindepth 1 -type d -exec basename {} \; | grep -vE 'lost\+found|vagrant|guest|backup')
+    [[ -z "$users" ]] && return 0
+    options=(
+        "bash.*" "chromium.*" "firefox.*" "gimp.*" "google_chrome.*" "java.*" "libreoffice.*"
+        "system.tmp" "system.trash" "system.cache" "thumbnails.*" "vlc.*" "wine.*" "x11.*"
+    )
+    for user in $users; do
+        log_info "A limpar lixo do utilizador: $user..."
+        run_as "$user" bleachbit --clean "${options[@]}" 2>&1 | grep "recuperado"
+    done
+
 }
 
 usage() {
     cat << EOF
 Uso: $(basename "$0") <comando> [componente]
 Comandos:
-  install   [base, gui, ocs, crontab, themes, browsers, office, logrotate]
-  remove    [gui, ocs, crontab, themes, browsers, office, logrotate]
+  install   [base, gui, ocs, crontab, themes, browsers, office]
+  remove    [gui, ocs, crontab, themes, browsers, office]
   clean     Limpeza de sistema e correção do APT.
   full      Instalação COMPLETA (Transforma Debian 12/13 em Windoze).
   
@@ -356,13 +428,13 @@ EOF
 main() {
     local comm="${1:-}" param="${2:-}"
     [[ -z "$comm" ]] && usage
-    get_root
+    get_root "$@"
     case "$comm" in
-#        "clean") clean_system ;;
+        "clean") clean_system ;;
         "install")
             case "$param" in
                 "base") install_base ;;
-                "gui") install_gui ;;
+                "gui") install_gui; install_lightdm ;;
                 "office") install_office ;;
                 "ocs") install_ocs ;;
                 "crontab") install_crontab ;;
@@ -385,10 +457,10 @@ main() {
         "full")
             install_base
             install_gui
+            install_lightdm
             install_ocs
             install_crontab
             install_themes
-            install_splash
             install_browsers
             install_office
             optimize

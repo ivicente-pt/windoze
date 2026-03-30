@@ -6,6 +6,9 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 TITLE="Gestão de utilizadores"
 MSG_CONFIRM="Esta operação vai APAGAR todos os dados locais do utilizador e repor as definições originais.\n\nContinuar?"
 MANAGE="${AEVH_BIN:-/opt/aevh/bin}/user-manage"
@@ -31,7 +34,7 @@ run_user_action() {
 }
 
 main() {
-    getroot "$@"
+    get_root "$@"
     local opt
     while true; do
         if ! opt=$(dialog --title "$TITLE" --menu "Escolha a ação para os perfis locais:" 15 55 5 \

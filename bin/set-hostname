@@ -7,9 +7,12 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 main() {
-    getroot "$@"
-    check_dependencies dialog
+    get_root "$@"
+    apt_install dialog
     local ans title="Configuração de Hostname" question="Indique o novo hostname desta máquina:" current
     current=$(trim "$(< /etc/hostname)")
 

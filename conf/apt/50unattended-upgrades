@@ -1,0 +1,12 @@
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=${version}-security,label=Debian-Security";
+    "origin=Debian,codename=${version},label=Debian-Security";
+    "origin=Debian,codename=${version},label=Debian";
+    "origin=Debian,codename=${version}-updates,label=Debian";
+};
+
+Unattended-Upgrade::Package-Blacklist {
+};
+
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::InstallOnShutdown "true";

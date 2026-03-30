@@ -1,45 +1,26 @@
 #!/bin/bash
 # Instalar o Windoze
-# v1.4.1 2025-12-21
+# v1.5 2026-03-29
 
-# Verificar se é Debian
-IS_DEBIAN=false
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [ "$ID" = "debian" ] || [ "$ID_LIKE" = "debian" ]; then
-        IS_DEBIAN=true
-    fi
-fi
-if [ ! $IS_DEBIAN ]; then
-    echo "Este sistema não é Debian ou não é possível determinar o tipo de sistema."
-    echo "Instalação cancelada."
-    exit 1
-fi
-echo "Sistema Debian detetado."
-echo "Continuando com a instalação."
+AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
-DEST="/opt"
-SRC=aevh.tgz
-if [[ ! -f "$SRC" ]]; then
-	echo "Não encontro $SRC"
-	exit 1
-fi
-if [[ "$(id -u)" -eq 0 ]]; then
-	mkdir -p "$DEST"
-	tar -xf "$SRC" -C "$DEST" --checkpoint=.1000
-	bash "$DEST"/aevh/bin/windoze full
-	bash "$DEST"/aevh/bin/profile-menu
-    echo "Instalação concluída. É preciso reiniciar o sistema."
-    echo "Reiniciar agora?"
-    read -p "S para reiniciar ou N para voltar à linha de comandos: " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Ss]$ ]]; then
-        reboot
-    else
-        echo "Reboot cancelado."
-    fi
-else
-    echo "Este script precisa de privilégios de root. Tentando com sudo."
-    script="$0"
-    exec sudo "$script" "$@"
-fi
+main() {
+    local distro
+    distro="$(get_distro)"
+    [[ "$distro" != "debian" ]] && log_critical "Este sistema não é Debian. Instalação cancelada."
+    echo "Sistema Debian detetado."
+
+    dst="/opt"
+    src=windoze.tgz
+    [[ ! -f "$src" ]] && log_critical "Não encontro $src"
+    get_root
+    mkdir -p "$dst"
+    tar -xf "$src" -C "$dst" --checkpoint=.1000
+    bash "$dst"/aevh/bin/windoze full
+    bash "$dst"/aevh/bin/profile-menu
+    confirm "Instalação concluída. É preciso reiniciar o sistema." "Reiniciar" && reboot
+    echo "Reiniciar log que possível."
+}
+
+main "$@"

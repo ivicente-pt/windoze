@@ -6,6 +6,9 @@ set -euo pipefail
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
 
+WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+
 other_ops() {
     local opt
     log_info "Menu de operações e teste."
@@ -26,7 +29,7 @@ other_ops() {
             "2")
                 clear
                 log_info "A testar notificação"
-                check_dependencies libnotify-bin 
+                apt_install libnotify-bin 
                 "$AEVH_BIN"/notify-all teste
             ;;
             "3") clear; "$AEVH_BIN"/set-hostname ;;
@@ -51,11 +54,8 @@ installations() {
             "C" "Crontab (tarefas agendadas)" \
             "D" "OCS Inventory Agent" \
             "E" "Temas visuais" \
-            "F" "Splash screen (boot)" \
-            "G" "Logrotate" \
-            "H" "YSoft SafeQ Client" \
-            "I" "Browsers (Firefox, Google Chrome)" \
-            "J" "Office (LibreOffice, OnlyOffice)" \
+            "F" "Browsers (Firefox, Google Chrome)" \
+            "G" "Office (LibreOffice, OnlyOffice)" \
             "0" "Voltar" 3>&1 1>&2 2>&3); then
             return 0
         fi
@@ -65,11 +65,9 @@ installations() {
             "C") clear; "$WINDOZE" install crontab ;;
             "D") clear; "$WINDOZE" install ocs ;;
             "E") clear; "$WINDOZE" install themes ;;
-            "F") clear; "$WINDOZE" install splash ;;
-            "G") clear; "$WINDOZE" install logrotate ;;
-            "H") clear; "$WINDOZE" install ysoft ;;
-            "I") clear; "$WINDOZE" install browsers ;;
-            "J") clear; "$WINDOZE" install office ;;
+            "F") clear; "$WINDOZE" install browsers ;;
+            "G") clear; "$WINDOZE" install office ;;
+            "0") return 0 ;;
         esac
         keywait
     done
@@ -101,6 +99,7 @@ uninstallations() {
             "6") "$WINDOZE" remove ysoft ;;
             "7") "$WINDOZE" remove chrome ;;
             "8") "$WINDOZE" remove onlyoffice ;;
+            "0") return 0 ;;
         esac
         keywait
     done
@@ -108,10 +107,10 @@ uninstallations() {
 
 main () {
     xhost local:root >/dev/null 2>&1 || true
-    getroot "$@"
+    get_root "$@"
     PATH="$PATH:$AEVH_BIN"
     WINDOZE="$AEVH_BIN/windoze"
-    check_dependencies dialog
+    apt_install dialog
     log_info "Bem vindo ao sistema de gestão."
     while true; do
         clear
