@@ -4,7 +4,8 @@ set -euo pipefail
 # user-menu v1.1 - 2026-03-24
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
+[[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 [[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }

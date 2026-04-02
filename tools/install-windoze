@@ -3,7 +3,8 @@
 # v1.5 2026-03-29
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
+[[ "$AEVH_LIB_LOADED" != "1"  && { echo "Falha a carregar lib AEVH"; exit 1; }
 
 main() {
     local distro
