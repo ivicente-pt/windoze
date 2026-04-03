@@ -7,7 +7,7 @@ error() { echo "Oops: $*"; exit 1; }
 
 install_lib() {
       lib="aevh-lib.sh"
-      [[ ! -f "$lib" ]] && wget --header="Authorization: Bearer $GH_PATH_TOKEN" \
+      [[ ! -f "$lib" ]] && wget --header="Authorization: Bearer $GH_PAT_TOKEN" \
             --header="Accept: application/vnd.github.raw" \
             https://api.github.com/repos/ivicente-pt/aevh/contents/lib/aevh-lib.sh
       [[ -f "$lib" ]] && bash ./aevh-lib.sh install

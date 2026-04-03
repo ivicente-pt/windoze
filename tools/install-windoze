@@ -4,7 +4,7 @@
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
-[[ "$AEVH_LIB_LOADED" != "1"  && { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
 
 main() {
     local distro

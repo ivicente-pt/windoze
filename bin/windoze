@@ -263,7 +263,7 @@ install_office() {
     pkg_installed onlyoffice-desktopeditors && return 0
     local oo_url="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
     install_url "$oo_url"
-    flatpak install --system flathub "${FLAT_OFFICE[@]}"
+    flatpak_install "${FLAT_OFFICE[@]}"
 }
 
 uninstall_browsers() {
@@ -456,6 +456,7 @@ main() {
             esac
         ;;
         "full")
+            flatpak_init
             install_base
             install_gui
             install_lightdm
