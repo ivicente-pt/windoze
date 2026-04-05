@@ -10,10 +10,11 @@ main() {
     command -v pigz &> /dev/null && zip="--use-compress-program=pigz -9 --rsyncable"
     pushd "$root" || error "Não consigo entrar em $root"
     [[ -d "$root/build/aevh" ]] && rm -rf "$root/build/aevh"
-    mkdir -p "$root"/build/aevh/{bin,conf,static}
+    mkdir -p "$root"/build/aevh/{bin,conf,static,lib}
     cp -aR bin/* "$root"/build/aevh/bin/
     cp -aR conf/* "$root"/build/aevh/conf/
     cp -aR static/* "$root"/build/aevh/static/
+    cp -aR ../aevh/lib/aevh-lib.sh "$root"/build/aevh/lib/
     cd "$root"/build || error "Não consigo entrar em $root/build"
     tar "${zip}" -cvf windoze.tgz aevh/
     rm -rf aevh

@@ -134,11 +134,12 @@ main () {
                 log_info "Atualização concluída"
                 keywait
             ;;
-        "2") installations ;;                                   
-        "3") uninstallations ;;                                  
-        "4") "$AEVH_BIN"/profile-menu ;;
-        "5") "$AEVH_BIN"/user-menu ;;                       
-        "6") other_ops ;;
+            "2") installations ;;                                   
+            "3") uninstallations ;;                                  
+            "4") "$AEVH_BIN"/profile-menu ;;
+            "5") "$AEVH_BIN"/user-menu ;;                       
+            "6") other_ops ;;
+            "0") return 0 ;;
         esac
     done
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
 # windoze v1.6 2026-03-24
@@ -8,7 +9,8 @@ AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
-[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
+[[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF"
+[[ -z "$WINDOZE_VER" ]] && { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
 
 PKG_BASE=(
         sudo fail2ban btop htop p7zip-full unrar-free pigz localepurge rsync earlyoom
@@ -24,8 +26,8 @@ PKG_GUI=(
     )
 PKG_WINE=( wine wine64-tools winetricks wine-binfmt binfmt-support wine32 wine32-preloader )
 PKG_DM=( lightdm slick-greeter lightdm-settings )
-PKG_OFFICE=( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
-FLAT_OFFICE=( org.onlyoffice.desktopeditors org.libreoffice.LibreOffice com.wps.Office com.collaboraoffice.Office )
+PKG_OFFICE=() #( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
+FLAT_OFFICE=( org.onlyoffice.desktopeditors ) # org.libreoffice.LibreOffice com.wps.Office com.collaboraoffice.Office )
 PKG_BROWSERS=( firefox-esr firefox-esr-l10n-pt-pt chromium )
 PKG_THEMES=( libsass1 sassc )
 PKG_PRINT=( cups )
@@ -68,14 +70,14 @@ setup_master() {
     apt_install xdg-user-dirs >/dev/null 2>&1
     su -l "$user" -c "xdg-user-dirs-update --force"
     desktop=$(su -l "$user" -c "xdg-user-dir DESKTOP")
-    copy_check "$AEVH_DATA/desktop/Windoze.desktop" "$desktop"
     apps="$home/.local/share/applications"
     mkdir -p "$apps"
+    copy_check "$AEVH_DATA/desktop/Windoze.desktop" "$desktop"
     compgen -G "$AEVH_DATA/desktop/*.desktop" > /dev/null && \
         for f in "$AEVH_DATA/desktop/"*.desktop; do
             copy_check "$f" "$apps"
         done
-    chown -R "$user:$user" "$home"
+    chown -R "$user:$user" "$home" || true
     log_info "Utilizador $user configurado"
 }
 
@@ -188,6 +190,7 @@ download_file() {
     fname=$(basename "$url")
     [[ -z "$dir" ]] && dir="$(mktemp -d)"
     [[ -d "$dir" ]] || return 1
+    need_cmd_pkg wget
     if ! wget --timeout=10 --tries=4 "$url" -O "$dir/$fname"; then
         log_warn "Não consigo transferir $url"
         return 1
@@ -456,8 +459,8 @@ main() {
             esac
         ;;
         "full")
-            flatpak_init
             install_base
+            flatpak_init
             install_gui
             install_lightdm
             install_ocs

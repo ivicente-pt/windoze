@@ -26,17 +26,13 @@ setup_xfce4_options() {
     xf_set() { xfconf-query -c "$1" -p "$2" -s "$3" --create -t "${4:-string}" || true; }
     
     log_info "A aplicar as opções visuais do XFCE4"
-    local prop properties
+    local monitors mon
 
     xf_set "xfce4-desktop" "/backdrop" "" 2>/dev/null || true
-    properties=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep "last-image$" || true)
-    if [[ -z $properties ]]; then
-        xf_set "xfce4-desktop" "/backdrop/screen0/monitor0/workspace0/last-image" "$WALLPAPER"
-    else
-        for prop in $properties; do
-            xf_set "xfce4-desktop" "$prop" "$WALLPAPER"
-        done
-    fi
+    monitors=$("$AEVH_BIN"/monitor-ctrl id)
+    for mon in $monitors; do
+        xf_set "xfce4-desktop" "/backdrop/screen0/monitor${mon}/workspace0/last-image" "$WALLPAPER"
+    done
 
     xf_set "xfwm4"          "/general/theme"            "$XFWM"
     xf_set "xsettings"      "/Net/ThemeName"            "$THEME"
@@ -62,7 +58,7 @@ setup_xfce4_options() {
 }
 
 setup_xfce4_panel() {
-    local profile_path="$AEVH_DATA/user/xfce4-painel-02.tar.bz2"
+    local profile_path="$AEVH_DATA/user/xfce4-painel-03.tar.bz2"
     [[ -f "$profile_path" ]] || return 1
     (
         export DISPLAY=${DISPLAY:-:0.0}

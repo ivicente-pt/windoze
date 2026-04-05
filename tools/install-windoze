@@ -13,15 +13,15 @@ main() {
     echo "Sistema Debian detetado."
 
     dst="/opt"
-    src=windoze.tgz
+    src=../build/windoze.tgz
     [[ ! -f "$src" ]] && log_critical "Não encontro $src"
     get_root
     mkdir -p "$dst"
     tar -xf "$src" -C "$dst" --checkpoint=.1000
-    bash "$dst"/aevh/bin/windoze full
-    bash "$dst"/aevh/bin/profile-menu
-    confirm "Instalação concluída. É preciso reiniciar o sistema." "Reiniciar" && reboot
-    echo "Reiniciar log que possível."
+    #bash "$dst"/aevh/bin/windoze full
+    #bash "$dst"/aevh/bin/profile-menu
+    #confirm "Instalação concluída. É preciso reiniciar o sistema." "Reiniciar" && reboot
+    #echo "Reiniciar logo que possível."
 }
 
 main "$@"

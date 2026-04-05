@@ -127,8 +127,16 @@ set_xfce_session() {
     log_info "A configurar ambiente XFCE para $user..."
     accounts_file="$accounts_dir/$user"
     mkdir -p "$accounts_dir"
-    printf "[User]\nSession=%s\nXSession=%s\n" "$session_name" "$session_name" > "$accounts_file"
+    cat << EOF > "$accounts_file"
+[org.freedesktop.DisplayManager.AccountsService]
+BackgroundFile='/usr/share/backgrounds/Windoze/Win11.jpg'
 
+[User]
+Session=
+XSession=xfce
+Icon=/home/$user/.face
+SystemAccount=false
+EOF
     user_home=$(get_home "$user")
     dmrc_file="$user_home/.dmrc"
     {

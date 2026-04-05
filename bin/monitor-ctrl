@@ -4,7 +4,7 @@ set -euo pipefail
 # monitor-ctrl v1.2 2026-03-24
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" > /dev/null
 [[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
@@ -67,7 +67,6 @@ usage() {
 
 # Mostra os IDs do monitores conectados
 cmd_id() {
-    echo "Monitores conectados:"
     xrandr | grep " connected" | grep -v "disconnected" | awk '{print $1}'
     return 0
 }

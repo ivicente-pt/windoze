@@ -3,31 +3,17 @@
 # install windoze from network v1.0.1
 # 2026-04-02
 
+# wget --no-check-certificate https://files.verdehorizonte.net/api/public/dl/NHXSbLKY/install-windoze-from-network
+
 error() { echo "Oops: $*"; exit 1; }
 
-install_lib() {
-      lib="aevh-lib.sh"
-      [[ ! -f "$lib" ]] && wget --header="Authorization: Bearer $GH_PAT_TOKEN" \
-            --header="Accept: application/vnd.github.raw" \
-            https://api.github.com/repos/ivicente-pt/aevh/contents/lib/aevh-lib.sh
-      [[ -f "$lib" ]] && bash ./aevh-lib.sh install
-}
-
-install_windoze() {
-      win="windoze.tgz"
-      winst="install-windoze"
-
-      [[ ! -f "$win" ]] && wget --no-check-certificate https://files.verdehorizonte.net/api/public/dl/NHXSbLKY/windoze.tgz
-      [[ ! -f "$winst" ]] && wget --header="Authorization: Bearer $GH_PAT_TOKEN" \
-            --header="Accept: application/vnd.github.raw" \
-            https://api.github.com/repos/ivicente-pt/windoze/contents/tools/install-windoze
-      bash "$winst"
-}
 
 main() {
       [[ "$EUID" != "0" ]] && error "São necessários provilégios de root"
-      install_lib
-      install_windoze
+      win="windoze.tgz"
+      [[ ! -f "$win" ]] && wget --no-check-certificate https://files.verdehorizonte.net/api/public/dl/NHXSbLKY/windoze.tgz
+      tar xzf "$win" -C /opt --checkpoint=.1000
+      /opt/aevh/bin/windoze full
 }
 
 main "$@"
