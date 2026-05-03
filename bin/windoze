@@ -22,7 +22,7 @@ PKG_GUI=(
         task-xfce-desktop xfce4 xfce4-goodies xfce4-whiskermenu-plugin fonts-croscore
         gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles dbus-x11
         gnome-calculator xfconf xfce4-power-manager bleachbit mugshot
-        mesa-utils picom pavucontrol
+        mesa-utils picom pavucontrol zenity
     )
 PKG_WINE=( wine wine32:i386 wine64 libwine libwine:i386 fonts-wine winetricks mono-complete
         binfmt-support wine64-tools wine-binfmt wine32-preloader wine64-preloader )
