@@ -4,8 +4,8 @@ set -euo pipefail
 # user-options v1.1 - 2026-03-24
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
-[[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || true
+[[ "${AEVH_LIB_LOADED:-0}" != "1" ]] && { echo "Falha a carregar $AEVH_LIB" >&2 ; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 [[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
@@ -22,50 +22,65 @@ LOGO="distributor-logo-windows"
 readonly DONE_FILE="$HOME/.config/xfce4/windoze_setup_done"
 
 setup_xfce4_options() {
-    
+
     xf_set() { xfconf-query -c "$1" -p "$2" -s "$3" --create -t "${4:-string}" || true; }
     
     log_info "A aplicar as opções visuais do XFCE4"
-    local monitors mon
+    local monitors="" mon
 
     xf_set "xfce4-desktop" "/backdrop" "" 2>/dev/null || true
-    monitors=$("$AEVH_BIN"/monitor-ctrl id)
-    for mon in $monitors; do
-        xf_set "xfce4-desktop" "/backdrop/screen0/monitor${mon}/workspace0/last-image" "$WALLPAPER"
-    done
+    if [[ -x "$AEVH_BIN/monitor-ctrl" ]]; then
+        monitors=$("$AEVH_BIN"/monitor-ctrl id 2>/dev/null)
+        for mon in $monitors; do
+            xf_set "xfce4-desktop" "/backdrop/screen0/monitor${mon}/workspace0/last-image" "$WALLPAPER"
+        done
+    else
+        xf_set "xfce4-desktop" "/backdrop/screen0/monitor0/workspace0/last-image" "$WALLPAPER"
+    fi
 
-    xf_set "xfwm4"          "/general/theme"            "$XFWM"
-    xf_set "xsettings"      "/Net/ThemeName"            "$THEME"
-    xf_set "xsettings"      "/Net/IconThemeName"        "$ICON"
-    xf_set "xsettings"      "/Gtk/FontName"             "$FONT"
-    xf_set "xfce4-desktop"  "/desktop-icons/style"      2           int
+    xf_set xfwm4          /general/theme            "$XFWM"
+    xf_set xsettings      /Net/ThemeName            "$THEME"
+    xf_set xsettings      /Net/IconThemeName        "$ICON"
+    xf_set xsettings      /Gtk/FontName             "$FONT"
+    xf_set xfce4-desktop  /desktop-icons/style      2          int
     # desempenho
-    xf_set "xsettings"      "/Net/EnableEventSounds"    "false"     "bool"
-    xf_set "xfwm4"          "/general/box_resize"       "true"      "bool"
-    xf_set "xfwm4"          "/general/box_move"         "true"      "bool"
-    xf_set "xfwm4"          "/general/show_popup_shadow" "false"    "bool"
-    xf_set "xfwm4"          "/general/show_frame_shadow" "false"    "bool"
-    xf_set "thunar"         "/last-show-thumbnails"     "false"     "bool"
-    xf_set "xfce4-notifyd"  "/expire-timeout"           3           "int"
+    xf_set xsettings      /Net/EnableEventSounds     false     bool
+    xf_set xfwm4          /general/box_resize        true      bool
+    xf_set xfwm4          /general/box_move          true      bool
+    xf_set xfwm4          /general/show_popup_shadow false     bool
+    xf_set xfwm4          /general/show_frame_shadow false     bool
+    xf_set thunar         /last-show-thumbnails      false     bool
+    xf_set xfce4-notifyd  /expire-timeout            3         int
 
     if [[ "$(get_ram_size)" -lt 2 ]]; then
-        xf_set "xfwm4"      "/general/use_compositing"  "false"     "bool"
+        xf_set xfwm4      /general/use_compositing  false      bool
     else
-        xf_set "xfwm4"      "/general/use_compositing"  "true"      "bool"
+        xf_set xfwm4      /general/use_compositing  true       bool
+    fi
+
+    # Usar a fonte Lexend
+    if fc-list | grep -i "lexend"; then
+        log_info "Fonte Lexend encontrada, a definir como fonte de sistema"
+        xf_set xsettings /Gtk/FontName       "Lexend 10"
+        xf_set xfwm4     /general/title_font "Lexend Bold 11"
+        xf_set xsettings /Xft/Antialias      1                  int
+        xf_set xsettings /Xft/RGBA           "rgb"
+        xf_set xsettings /Xft/Hinting        1                  int
+        xf_set xsettings /Xft/HintStyle      "hintslight"
     fi
 
     xdg-user-dirs-update --force
 }
 
 setup_xfce4_panel() {
-    local profile_path="$AEVH_DATA/user/xfce4-painel-03.tar.bz2"
+    local profile_path="$AEVH_DATA/user/windoze-26.tar.bz2"
     [[ -f "$profile_path" ]] || return 1
     (
         export DISPLAY=${DISPLAY:-:0.0}
         sleep 2
         if xfce4-panel-profiles load "$profile_path" >/dev/null 2>&1; then
             sleep 1
-             xfce4-panel -r >/dev/null 2>&1
+            xfce4-panel -r >/dev/null 2>&1
         fi
     ) &
 }
@@ -78,19 +93,34 @@ Session=xfce
 EOF
 
     echo "exec startxfce4" > "$HOME/.xsession"
-    chown "$USER:$USER" "$HOME/.dmrc" "$HOME/.xsession"
 }
 
 setup_flatpak() {
     if command -v flatpak > /dev/null; then
-        flatpak override --user --filesystem=/media || true
-        flatpak override --user --filesystem=removable-media || true
+        flatpak override --user --filesystem=/media:rw || true
+        flatpak override --user --filesystem=/run/media/$USER:rw || true
+        flatpak override --user --filesystem=/run/media:ro || true
     fi
+}
+
+setup_options() {
+    xdg-settings set default-web-browser firefox.desktop
+    xdg-mime default firefox.desktop x-scheme-handler/http
+    xdg-mime default firefox.desktop x-scheme-handler/https
+    xdg-mime default firefox.desktop text/html
 }
 
 main() {
     is_root && log_critical "Este script não deve ser executado como root nem com sudo!"
     [[ -f "$DONE_FILE" ]] && exit 0
+    # Verificação de integridade antes de lançar para background
+    if command -v winetricks >/dev/null 2>&1; then
+        winetricks -q corefonts vcrun2015 &
+    else
+        log_warn "winetricks não detetado. Bibliotecas ignoradas."
+    fi
+    setup_options &
+    setup_flatpak &
     sleep 8
     setup_xfce4_options
     sleep 1
@@ -98,7 +128,6 @@ main() {
     sleep 1
     setup_xfce4_session
     sleep 1
-    setup_flatpak
     mkdir -p "$(dirname "$DONE_FILE")"
     touch "$DONE_FILE"
     log_info "Configuração de utilizador concluída com sucesso: $USER"

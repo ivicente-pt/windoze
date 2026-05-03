@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-# windoze v1.6 2026-03-24
+# windoze v1.6 2026-04-05
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
-[[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || true
+[[ "${AEVH_LIB_LOADED:-0}" != "1" ]] && { echo "Falha a carregar $AEVH_LIB" >&2 ; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 [[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF"
@@ -14,70 +14,80 @@ WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 
 PKG_BASE=(
         sudo fail2ban btop htop p7zip-full unrar-free pigz localepurge rsync earlyoom
-        zram-tools xcape molly-guard numlockx openssh-server wget curl dialog unattended-upgrades jq
-        alsa-utils cups bleachbit
+        zram-tools xcape molly-guard numlockx openssh-server wget curl unattended-upgrades jq
+        alsa-utils cups bleachbit fuse3
     )
 PKG_GUI=(
         ttf-mscorefonts-installer vlc libnotify-bin libglib2.0-bin fonts-noto-color-emoji
         task-xfce-desktop xfce4 xfce4-goodies xfce4-whiskermenu-plugin fonts-croscore
-        gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles plank dbus-x11
+        gtk2-engines-murrine network-manager-gnome xfce4-panel-profiles dbus-x11
         gnome-calculator xfconf xfce4-power-manager bleachbit mugshot
-        mesa-utils picom
+        mesa-utils picom pavucontrol
     )
-PKG_WINE=( wine wine64-tools winetricks wine-binfmt binfmt-support wine32 wine32-preloader )
+PKG_WINE=( wine wine32:i386 wine64 libwine libwine:i386 fonts-wine winetricks mono-complete
+        binfmt-support wine64-tools wine-binfmt wine32-preloader wine64-preloader )
 PKG_DM=( lightdm slick-greeter lightdm-settings )
-PKG_OFFICE=() #( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
+PKG_OFFICE=( hunspell-pt-pt libxcb-xinerama0 ) #( libreoffice libreoffice-l10n-pt libreoffice-help-pt )
 FLAT_OFFICE=( org.onlyoffice.desktopeditors ) # org.libreoffice.LibreOffice com.wps.Office com.collaboraoffice.Office )
 PKG_BROWSERS=( firefox-esr firefox-esr-l10n-pt-pt chromium )
 PKG_THEMES=( libsass1 sassc )
-PKG_PRINT=( cups )
 PKG_OCS=( ocsinventory-agent )
+PKG_CLEAN=( google-chrome-stable plank cinnamon onlyoffice-desktopeditors )
+FILES_CLEAN=( /etc/apt/sources.list.d/google-chrome.list )
 
 generate_apt_list() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    version="${1:-}"
-    [[ "$version" != "bookworm" && "$version" != "trixie" ]] && return 1
+    local debian
+    debian=$(get_debian_version)
+    [[ "$debian" != "bookworm" && "$debian" != "trixie" ]] && return 1
     cat << EOF
-deb http://deb.debian.org/debian/ "${version}" main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian/ "${version}" main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security "${version}"-security main contrib non-free non-free-firmware
-deb-src http://security.debian.org/debian-security "${version}"-security main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian/ "${version}"-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian/ "${version}"-updates main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian/ "${debian}" main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security "${debian}"-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian/ "${debian}"-updates main contrib non-free non-free-firmware
 EOF
 }
 
 setup_repos() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    local list="/etc/apt/sources.list" debian="${1:-}"
+    local list="/etc/apt/sources.list" debian to_del="/etc/apt/sources.list.d/aevh-sources.list"
     log_info "A configurar repositórios"
+    debian=$(get_debian_version)
     [[ "$debian" != "bookworm" && "$debian" != "trixie" ]] && log_critical "Versão não suportada: $debian"
+    [[ -f "$to_del" ]] && rm -f "$to_del"
     rotate_file_backup "$list"
     generate_apt_list "$debian" > "$list"
     log_info "A atualizar repositórios"
-    apt_update && log_info "Repositórios configurados"
+    apt_cmd clean
+    apt_update || { log_warn "Erro ao atualizar repositórios"; return 1; }
+    log_info "Repositórios configurados"
 }
 
 setup_master() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local desktop apps home user="master"
-    local pass_file="$AEVH_DATA/user/master.psw" groups="sudo,plugdev,netdev,audio,video"
-    user_exists "$user"|| useradd -m -s /bin/bash -U "$user"
-    usermod -aG "$groups" "$user" 2>/dev/null
+    local pass_file="$AEVH_DATA/user/master.psw" groups="sudo,plugdev,netdev,audio,video,lpadmin"
+    log_info "A configurar utilizador: $user"
+    user_exists "$user" || useradd -m -s /bin/bash -U "$user"
+    IFS=',' read -ra ADDR <<< "$groups"
+    for g in "${ADDR[@]}"; do
+        getent group "$g" >/dev/null && usermod -aG "$g" "$user"
+    done
     [[ -f "$pass_file" ]] && echo "$user:$(<"$pass_file")" | chpasswd -e
     home="$(get_home "$user")"
     [[ -z "$home" ]] && { log_error "Não foi possível determinar a home do $user"; return 1; }
     apt_install xdg-user-dirs >/dev/null 2>&1
-    su -l "$user" -c "xdg-user-dirs-update --force"
-    desktop=$(su -l "$user" -c "xdg-user-dir DESKTOP")
+    chown -R "$user:$user" "$home"
+    sudo -u "$user" xdg-user-dirs-update --force
+    desktop=$(sudo -u "$user" xdg-user-dir DESKTOP)
     apps="$home/.local/share/applications"
     mkdir -p "$apps"
     copy_check "$AEVH_DATA/desktop/Windoze.desktop" "$desktop"
+    [[ -f "$desktop"/Windoze.desktop ]] && chmod +x "$desktop"/Windoze.desktop
     compgen -G "$AEVH_DATA/desktop/*.desktop" > /dev/null && \
         for f in "$AEVH_DATA/desktop/"*.desktop; do
             copy_check "$f" "$apps"
         done
-    chown -R "$user:$user" "$home" || true
+    chown -R "$user:$user" "$home"
     log_info "Utilizador $user configurado"
 }
 
@@ -92,10 +102,12 @@ setup_skeleton() {
 [Desktop Entry]
 Type=Application
 Name=Windoze First Run
+Comment=Configura o ambiente Windoze na primeira execução
 Exec=/opt/aevh/bin/user-options
 Terminal=false
 Icon=distributor-logo-windows
 OnlyShowIn=XFCE;
+StartupNotify=false
 EOF
 
     cat << EOF > /etc/skel/.dmrc
@@ -103,13 +115,16 @@ EOF
 Session=xfce
 EOF
     chmod 644 /etc/skel/.dmrc
+    find /etc/skel -type d -exec chmod 755 {} +
+    find /etc/skel -type f -exec chmod 644 {} +
+    
+    log_info "Esqueleto (skel) configurado e pronto para novos utilizadores."
 }
 
 install_base() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar a base do sistema"
-    debian="$(get_debian_version)"
-    setup_repos "$debian"
+    setup_repos
     setup_master
     setup_skeleton
     copy_check "$AEVH_CONF/apt/50unattended-upgrades" "/etc/apt/apt.conf.d"
@@ -121,6 +136,7 @@ install_base() {
     echo "localepurge localepurge/mandelete boolean true" | debconf-set-selections
     apt_install "${PKG_BASE[@]}"
     apt_cmd autopurge
+    command -v localepurge >/dev/null && localepurge
     log_info "Instalação base concluída."
 }
 
@@ -130,40 +146,76 @@ install_wine() {
     dpkg --add-architecture i386
     apt_update
     apt_install "${PKG_WINE[@]}"
-    update-binfmts --import wine >/dev/null 2>&1
+    [[ -f /usr/share/binfmts/wine ]] && update-binfmts --enable wine >/dev/null 2>&1 || true
     log_info "Subsistema Windows instalado"
 }
 
 install_lightdm() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    log_info "A configurar lightdm"
     echo "lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections
     apt_install "${PKG_DM[@]}"
     mkdir -p /etc/lightdm/lightdm.conf.d
     copy_safe "$AEVH_CONF/lightdm/lightdm.conf" "/etc/lightdm"
     copy_safe "$AEVH_CONF/lightdm/slick-greeter.conf" "/etc/lightdm"
-    echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
+    if command -v numlockx >/dev/null; then
+        printf "[Seat:*]\ngreeter-setup-script=/usr/bin/numlockx on\n" > /etc/lightdm/lightdm.conf.d/99-numlock.conf
+    fi
     DEBIAN_FRONTEND=noninteractive dpkg-reconfigure lightdm
+    systemctl unmask lightdm
     systemctl enable lightdm
     log_info "LightDM configurado com sucesso."
 }
 
+setup_lexend() {
+    log_info "A instalar a fonte Lexend"
+    local base_url="https://github.com/googlefonts/lexend/raw/main/fonts/lexend/ttf"
+    local font_dir="/usr/local/share/fonts/lexend" fname
+    sudo mkdir -p "$font_dir"
+    for style in "Regular" "Bold" "Light" "Medium"; do
+        fname="Lexend-$style.ttf"
+        if [[ -f "$font_dir"/"$fname" ]]; then
+            log_info "Lexend-$style: instalada"
+        else
+            log_info "Lexend-$style: a instalar"
+            download_file "$base_url/Lexend-$style.ttf" "$font_dir" 
+        fi
+    done
+    sudo fc-cache -fv > /dev/null
+    log_info "Instalação da fonte Lexend concluída com sucesso."
+}
+
 install_gui() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    local pkg
+    log_info "A instalar a interface gráfica"
+    local pkg lexend lexend_dir="/usr/local/share/fonts/lexend"
     is_debian12 && pkg=( libgl1-mesa-glx )
-    is_debian13 && pkg=( libgl1 libglx-mesa0 )
+    is_debian13 && pkg=( libgl1 libglx-mesa0 libegl1 )
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
     apt_install "${PKG_GUI[@]}" "${pkg[@]}"
+    if [ -f /etc/lightdm/lightdm.conf ]; then
+        sed -i 's/^#user-session=.*/user-session=xfce/' /etc/lightdm/lightdm.conf
+    fi
+    setup_lexend
+    fc-cache -fv >/dev/null 2>&1
     log_info "Interface gráfica instalada com sucesso"
 }
 
 install_ocs() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    log_info "A instalar o agente de inventário"
     echo "ocsinventory-agent ocsinventory-agent/method select local" | debconf-set-selections
     echo "ocsinventory-agent ocsinventory-agent/server string localhost" | debconf-set-selections
     apt_install "${PKG_OCS[@]}"
+    systemctl stop ocsinventory-agent.service 2>/dev/null || true
     copy_safe "$AEVH_CONF/ocsinventory/ocsinventory-agent.cfg" "/etc/ocsinventory"
+    gsettings set org.gnome.desktop.interface font-name 'Lexend 11'
+    gsettings set org.gnome.desktop.interface document-font-name 'Lexend 11'
     command -v ocsinventory-agent >/dev/null && ocsinventory-agent --force >/dev/null 2>&1 &
+    if is_debian13; then
+        systemctl enable ocsinventory-agent.service 2>/dev/null || true
+        systemctl enable ocsinventory-agent.timer 2>/dev/null || true
+    fi
     log_info "OCS Inventory instalado"
 }
 
@@ -171,28 +223,37 @@ install_ocs() {
 install_crontab() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar o novo crontab"
-    local current_cron new_lines
+    local cron_tmp cron_file="$AEVH_CONF/crontab.root"
+    [[ ! -f "$cron_file" ]] && { log_error "Ficheiro de crontab não encontrado em $cron_file"; return 1; }
     uninstall_crontab
-    current_cron=$(crontab -l 2>/dev/null) || true
-    new_lines=$(cat $AEVH_CONF/crontab.root)
-    if [[ -z "$current_cron" ]]; then
-        final_cron="$new_lines"
+    cron_tmp=$(mktemp)
+    crontab -l 2>/dev/null | grep -v "aevh" > "$cron_tmp" || true
+    {
+        echo ""
+        echo "# --- AEVH Auto-Shutdown Rules ---"
+        cat "$cron_file"
+        echo "# --- End AEVH Rules ---"
+    } >> "$cron_tmp"
+    if crontab "$cron_tmp"; then
+        log_info "Novo cron instalado com sucesso."
     else
-        final_cron=$(printf "%s\n%s" "$current_cron" "$new_lines")
+        log_error "Falha ao instalar crontab."
+        rm -f "$cron_tmp"
+        return 1
     fi
-    echo "$final_cron" | crontab -
+    rm -f "$cron_tmp"
 }
 
 download_file() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local fname url="${1:-}" dir="${2:-}"
     [[ -z "$url" ]] && return 1
-    fname=$(basename "$url")
-    [[ -z "$dir" ]] && dir="$(mktemp -d)"
-    [[ -d "$dir" ]] || return 1
+    fname=$(basename "${url%%\?*}")
+    [[ -z "$dir" ]] && dir="/tmp/aevh-downloads"
+    mkdir -p "$dir" || return 1
     need_cmd_pkg wget
-    if ! wget --timeout=10 --tries=4 "$url" -O "$dir/$fname"; then
-        log_warn "Não consigo transferir $url"
+    if ! wget --timeout=15 --tries=5 --continue "$url" -O "$dir/$fname"; then
+        log_warn "Falha na transferência de: $url"
         return 1
     fi
     echo "$dir/$fname"
@@ -203,6 +264,7 @@ install_deb() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local deb="${1:-}"
     [[ -z "$deb" || ! -f "$deb" ]] && return 1
+    [[ "$deb" != /* && "$deb" != ./* ]] && deb="./$deb"
     apt_install "$deb" || return 1
     log_info "Sucesso: '$deb' instalado."
     return 0
@@ -213,49 +275,80 @@ install_url() {
     local url="${1:-}" fname
     [[ -z "$url" ]] && return 1
     fname="$(download_file "$url")" || return 1
-    install_deb "$fname" || return 1
+    if [[ ! -s "$fname" ]]; then
+        log_error "Ficheiro não existe: $fname"
+        [[ -f "$fname" ]] && rm -f "$fname"
+        return 1
+    fi
+
+    if ! install_deb "$fname"; then
+        log_error "Falha ao instalar o ficheiro deb: $fname"
+        return 1
+    fi
+
+    rm -f "$fname"
+    log_info "Instalação concluída com sucesso."
     return 0
 }
 
 install_themes() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    log_info "A instalar wallpapers"
+    log_info "A instalar temas visuais"
     local url tmp_dir theme_dir src="$AEVH_DATA/themes/Fluent.tgz"
     local bg_dst="/usr/share/backgrounds/Windoze"
     [[ -d "$bg_dst" || -L "$bg_dst" ]] && rm -rf "$bg_dst"
     ln -sfn "$AEVH_DATA/wallpaper" "$bg_dst"
     apt_install "${PKG_THEMES[@]}"
 
-    tmp_dir=$(mktemp -d)
-
     if [[ -f "$src" ]]; then
+        tmp_dir=$(mktemp -d)
         tar xzf "$src" -C "$tmp_dir"
-        theme_dir="$tmp_dir"/Fluent
-        if [[ -n "$theme_dir" && -d "$theme_dir" ]]; then 
-            log_info "A instalar Fluent..."
+        theme_dir=$(find "$tmp_dir" -maxdepth 2 -type d -name "Fluent*" | head -n 1)
+        if [[ -d "$theme_dir" ]]; then 
+            log_info "A instalar GTK Fluent..."
             pushd "$theme_dir" >/dev/null
-            ./install.sh --tweaks round solid square  -s compact 
+            ./install.sh --tweaks round solid square -s compact 
             popd >/dev/null
-            log_info "Tema Fluent instalado"
         else
             log_warn "Não consegui instalar o tema Fluent"
         fi
+        rm -rf "$tmp_dir"
     fi
 
     url="https://github.com/luisrguerra/fluent11-icon-theme/releases/download/0.5.2/wow64-0.5.2.deb"
-    pkg_installed wow64-icon-themes || install_url "$url"
-    chmod -R a+r /usr/share/themes
-    chmod -R a+r /usr/share/icons
-    chmod -R a+r /usr/share/backgrounds
+    if ! pkg_installed wow64-icon-themes; then
+        install_url "$url"
+    fi
+    chmod -R a+r /usr/share/themes /usr/share/icons /usr/share/backgrounds
+    find /usr/share/themes /usr/share/icons -type d -exec chmod a+x {} +
+    log_info "Temas visuais instalados"
 }
 
 install_browsers() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar browsers"
     apt_install "${PKG_BROWSERS[@]}"
+
+    update-alternatives --set x-www-browser /usr/bin/firefox-esr 2>/dev/null || true
+    update-alternatives --set gnome-www-browser /usr/bin/firefox-esr 2>/dev/null || true
+
+    mkdir -p /etc/firefox-esr/distribution
+    cat << EOF > /etc/firefox-esr/distribution/policies.json
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "",
+    "Permissions": {
+      "Usb": { "Allow": ["https://scratch.mit.edu"] },
+      "Bluetooth": { "Allow": ["https://scratch.mit.edu"] }
+    }
+  }
+}
+EOF
+    log_info "Browsers instalados e configurados."
 #    local chrome_deb chrome_url="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
 #    install_url "$chrome_url"
-
 }
 
 # Instala o Office: OnlyOffice
@@ -263,52 +356,57 @@ install_office() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar Office"
     apt_install "${PKG_OFFICE[@]}"
-    pkg_installed onlyoffice-desktopeditors && return 0
-    local oo_url="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
-    install_url "$oo_url"
+    #pkg_installed onlyoffice-desktopeditors && return 0
+    #local oo_url="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb"
+    #install_url "$oo_url"
     flatpak_install "${FLAT_OFFICE[@]}"
+    log_info "Office instalado"
 }
 
 uninstall_browsers() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    remove_pkg google-chrome-stable "${PKG_BROWSERS[@]}"
-    local list="/etc/apt/sources.list.d/google-chrome.list"
-    [[ -f "$list" ]] || return 0
-    rm -f "$list"
+    apt_purge "${PKG_BROWSERS[@]}"
+    apt_cmd autopurge
 }
 
 uninstall_office() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    remove_pkg onlyoffice-desktopeditors "${PKG_OFFICE[@]}"
+    apt_purge "${PKG_OFFICE[@]}"
+    flatpak uninstall -y --delete-data "${FLAT_OFFICE[@]}"
+    flatpak uninstall --unused -y 
+    apt_cmd autopurge
 }
 
 uninstall_lightdm() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     systemctl stop lightdm 2>/dev/null || true
     systemctl disable lightdm 2>/dev/null || true
-    apt_purge "${PKG_DM[@]}" && rm -rf /etc/lightdm/
+    apt_purge "${PKG_DM[@]}"
+    rm -rf /etc/lightdm/
+    apt_cmd autopurge
 }
 
 uninstall_gui() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     apt_purge "${PKG_GUI[@]}"
+    apt_cmd autopurge
 }
 
 uninstall_ocs() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    apt_purge "${PKG_OCS[@]]}"
+    apt_purge "${PKG_OCS[@]}"
+    apt_cmd autopurge
     rm -rf /etc/ocsinventory /var/lib/ocsinventory-agent
 }
 
 uninstall_crontab() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    local current to_remove updated
-    current=$(crontab -l 2>/dev/null) || true
+    local current updated
+    current=$(crontab -l 2>/dev/null) || return 0
     [[ -z "$current" ]] && return 0
-    to_remove="$(cat $AEVH_CONF/crontab.root)"
-    [[ -z "$to_remove" ]] && return 0
-    updated=$(echo "$current" | grep -vFx "$to_remove") || true
-    if [[ -z "$updated" ]]; then
+    updated=$(echo "$current" | grep -vFf "$AEVH_CONF/crontab.root" | grep -v aevh || true )
+    updated=$(echo "$updated" | sed '/^$/N;/^\n$/D')
+    if [[ -z "$(echo "$updated" | tr -d '[:space:]')" ]]; then
         crontab -r 2>/dev/null
     else
         echo "$updated" | crontab -
@@ -319,61 +417,81 @@ uninstall_crontab() {
 uninstall_themes() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     apt_purge wow64-icon-themes "${PKG_THEMES[@]}"
-    rm -rf /usr/share/themes/Fluent /usr/share/backgrounds/Windoze
-    gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+    apt_cmd autopurge
+    rm -rf /usr/share/themes/Fluent* /usr/share/backgrounds/Windoze
+    for dir in /usr/share/icons/*; do
+        if [[ -d "$dir" && -f "$dir/index.theme" ]]; then
+            gtk-update-icon-cache -f -t "$dir" 2>/dev/null || true
+        fi
+    done
 }
 
 auto_optimize_preload() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    local override_dir="/etc/systemd/system/preload.service.d"
-    if [[ "$(get_disk_type /)" == "HDD" ]]; then 
+    local override_dir="/etc/systemd/system/preload.service.d" disk_type
+    disk_type=$(get_disk_type /) || true
+    if [[ "$disk_type" == "HDD" ]]; then 
         apt_install preload
+        mkdir -p "$override_dir"
         copy_safe "$AEVH_CONF/systemd/override.conf" "$override_dir"
+        systemctl daemon-reload
         systemctl restart --no-block preload
-    else
-        pkg_installed preload && apt_purge preload
+        return 0
     fi
+    # Se não é HDD
+    apt_purge preload
+    rm -rf "$override_dir"
+    apt_cmd autopurge
 }
 
 auto_optimize_zram() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    local zram_config="/etc/default/zramswap"
+    local zram_config="/etc/default/zramswap" size=60 algo="zstd"
+    apt_install zram-tools
     systemctl stop zramswap 2>/dev/null
-    echo "ALLOCATION_STRATEGY=percent" > "$zram_config"
-    if [[ "$(get_cpu_benchmark_multithread)" -le 100 ]]; then
-        echo "PERCENT=50" >> "$zram_config"
-        echo "COMPRESSION_ALGORITHM=lz4" >> "$zram_config"
-    else
-        echo "PERCENT=60" >> "$zram_config"
-        echo "COMPRESSION_ALGORITHM=zstd" >> "$zram_config"
-    fi
-    echo "PRIORITY=100" >> "$zram_config"
-    systemctl restart zramswap
+    [[ "$(get_cpu_benchmark_multithread)" -le 100 ]] && { size=50; algo="lz4"; }
+    cat << EOF > "$zram_config"
+ALLOCATION_STRATEGY=percent
+PERCENT=$size
+COMPRESSION_ALGORITHM="$algo"
+PRIORITY=100
+EOF
+    systemctl restart zramswap 2>/dev/null || log_warn "Não foi possível reiniciar zramswap"
 
     local sys_file="/etc/sysctl.d/99-swappiness.conf"
     mkdir -p "$(dirname "$sys_file")"
     [[ ! -f "$sys_file" ]] && touch "$sys_file" 
     set_config_value "$sys_file" "vm.swappiness" "100"
+    set_config_value "$sys_file" "vm.vfs_cache_pressure" "50"
     sysctl -p "$sys_file" >/dev/null
 }
 
 auto_optimize_logs() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    set_config_value "/etc/systemd/journald.conf" "SystemMaxUse" "50M"
-    if [[ $(get_ram_size) -le 2 ]]; then
-        set_config_value "/etc/systemd/journald.conf" "Storage" "persistent"
-    else
-        set_config_value "/etc/systemd/journald.conf" "Storage" "volatile"
-    fi
+    local conf_dir="/etc/systemd/journald.conf.d"
+    local conf_file="$conf_dir/99-aevh-logs.conf" storage="volatile"
+
+    [[ $(get_ram_size) -le 2 ]] && storage="persistent"
+    mkdir -p "$conf_dir"
+    cat << EOF > "$conf_file"
+[Journal]
+Storage=$storage
+SystemMaxUse=50M
+RuntimeMaxUse=50M
+MaxRetentionSec=2d
+EOF
+
     (
-        journalctl --vacuum-time=2d > /dev/null 2>&1
+        journalctl --vacuum-size=50M --vacuum-time=2d >/dev/null 2>&1
         systemctl restart systemd-journald
     ) &
+
+    log_info "Otimização de logs concluída."
 }
 
 auto_optimize_init() {
-    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
+#    [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+#    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
     update-initramfs -u >/dev/null 2>&1
 }
 
@@ -387,6 +505,7 @@ optimize() {
     auto_optimize_zram
     auto_optimize_logs
     auto_optimize_init
+    apt_cmd autopurge
     log_info "Serviços otimizados"
 }
 
@@ -394,9 +513,10 @@ clean_system() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     apt_fix
     apt_update
-    apt_purge
+    apt_install bleachbit
     apt_upgrade
     apt_cmd autoclean
+    apt_cmd autopurge
     journalctl --vacuum-time=2d >/dev/null 2>&1
     command -v bleachbit >/dev/null || return 0
     local user users options
@@ -408,9 +528,13 @@ clean_system() {
     )
     for user in $users; do
         log_info "A limpar lixo do utilizador: $user..."
-        run_as "$user" bleachbit --clean "${options[@]}" 2>&1 | grep "recuperado"
+        run_as "$user" bleachbit --clean "${options[@]}" 2>&1 | grep "recuperado" || true
     done
-
+    for f in "${FILES_CLEAN[@]}"; do
+        [[ -f "$f" ]] && rm -f "$f"
+    done
+    rm -rf /var/cache/fontconfig/*
+    rm -rf /tmp/* 2>/dev/null || true
 }
 
 usage() {
@@ -423,8 +547,8 @@ Comandos:
   full      Instalação COMPLETA (Transforma Debian 12/13 em Windoze).
   
 Exemplos:
-  $(basename "$0") install gui
-  $(basename "$0") remove themes
+  $(basename "$0") install themes
+  $(basename "$0") full
 EOF
     exit 1
 }
@@ -434,47 +558,54 @@ main() {
     [[ -z "$comm" ]] && usage
     get_root "$@"
     case "$comm" in
-        "clean") clean_system ;;
+        "clean")
+            clean_system
+            ;;
         "install")
             case "$param" in
-                "base") install_base ;;
-                "gui") install_gui; install_lightdm ;;
-                "office") install_office ;;
-                "ocs") install_ocs ;;
-                "crontab") install_crontab ;;
-                "themes") install_themes ;;
+                "base")     install_base ;;
+                "gui")      install_gui; install_lightdm; install_wine ;;
+                "office")   install_office ;;
+                "ocs")      install_ocs ;;
+                "crontab")  install_crontab ;;
+                "themes")   install_themes ;;
                 "browsers") install_browsers ;;
-                *) log_error "$0 $comm $param - Opção inválida" ;;
+                *) log_error "Componente inválido: $param"; usage ;;
             esac
-        ;;
+            ;;
         "remove")
             case "$param" in
                 "browsers") uninstall_browsers ;;
-                "office") uninstall_office ;;
-                "gui") uninstall_gui ;;
-                "ocs") uninstall_ocs ;;
-                "crontab") uninstall_crontab ;;
-                "themes") uninstall_themes ;;
-                *) log_error "$0 $1 $2 - Opção inválida" ;;
+                "office")   uninstall_office ;;
+                "gui")      uninstall_lightdm; uninstall_gui ;;
+                "ocs")      uninstall_ocs ;;
+                "crontab")  uninstall_crontab ;;
+                "themes")   uninstall_themes ;;
+                *) log_error "Componente inválido: $param"; usage ;;
             esac
-        ;;
+            ;;
         "full")
+            log_info "Iniciando a transformação completa do sistema..."
+            apt_purge "${PKG_CLEAN[@]}"
+            apt_fix
             install_base
             flatpak_init
             install_gui
             install_lightdm
+            install_wine
             install_ocs
             install_crontab
             install_themes
             install_browsers
             install_office
             optimize
+            clean_system
             log_info "Instalação concluída"
             ;;
         *)
             log_error "Comando desconhecido: $comm"
             usage
-        ;;
+            ;;
     esac
 }
 

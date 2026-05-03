@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# notify-all v1.1 - 2026-03-24
+# notify-all v1.1 - 2026-04-07
 # Envia uma notificação a todos os utilizadores logados na interface gráfica
 
 main() {
@@ -12,10 +12,10 @@ main() {
 
     # Lista todas as sessões. O grep filtra apenas sessões ativas com user
     loginctl list-sessions --no-legend | while read -r session_id user_uid user_name _rest; do
-        
+
         session_type=$(loginctl show-session -p Type --value "$session_id")
         [[ "$session_type" != "x11" ]] && [[ "$session_type" != "wayland" ]] && continue
-            
+
         DBUS_ADDRESS="unix:path=/run/user/${user_uid}/bus"
         DISPLAY_ID=$(loginctl show-session -p Display --value "$session_id")
         DISPLAY_ID=${DISPLAY_ID:-:0}
@@ -23,7 +23,7 @@ main() {
         [[ -S "/run/user/${user_uid}/bus" ]] && runuser -u "$user_name" -- env \
             DISPLAY="$DISPLAY_ID" \
             DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDRESS" \
-            /usr/bin/notify-send -i "dialog-information" "Mensagem do sistema" "$@"
+            /usr/bin/notify-send -i "dialog-information" "Mensagem do sistema" "$*"
     done
 }
 

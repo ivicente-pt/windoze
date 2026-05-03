@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# monitor-ctrl v1.2 2026-03-24
+# monitor-ctrl v1.2 2026-04-07
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" > /dev/null
@@ -29,40 +29,19 @@ get_first_connected_monitor_id() {
 # Obter a orientação atual de um monitor. Parâmetros: $1 = monitor_id
 # Retorna a orientação (normal, right, inverted, left) ou string vazia.
 get_monitor_orientation() {
-    local monitor_id="${1:-}"
-	# shellcheck disable=SC2155
-	local flag=$(xrandr | grep "^${monitor_id} connected" | awk '{print $3}')
+    local monitor_id="${1:-}" flag orientation
+    # shellcheck disable=SC2155
+    flag=$(xrandr | grep "^${monitor_id} connected" | awk '{print $3}')
     # Para o monitor primary a orientação é a 5ª palavra, para os outros é a 4ª
     if [[ "$flag" == "primary" ]]; then
         # shellcheck disable=SC2155
-        local orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $5}')
+        orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $5}')
     else
         # shellcheck disable=SC2155
-        local orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $4}')
+        orientation=$(xrandr | grep "^${monitor_id} connected" | awk '{print $4}')
     fi
-    if [[ "$orientation" == "(normal" ]]; then
-        orientation="normal"
-    fi
+    [[ "$orientation" == "(normal" ]] && orientation="normal"
     echo "$orientation"
-}
-
-# Funções principais
-
-# Mostra o texto de ajuda
-usage() {
-    echo "Uso: $(basename "$0") help | id | orientation [id] | rotate [id] [orientation]"
-    echo "Controlar a orientação do(s) monitor(es)"
-    echo "Comandos:"
-    echo "  help                       Mostra este texto de ajuda."
-    echo "  id                         Lista o ID dos monitores ligados."
-    echo "  orientation [id]           Apresenta a orientação do monitor 'id'."
-    echo "                             Se omitido mostra a orientação do monitor atual."
-    echo "  rotate [id] [orientation]  Roda o monitor 'id' para a orientação orientation."
-    echo "                             Orientações possíveis: normal right inverted left"
-    echo "                             'orientation' omitido = roda o monitor 90 graus no"
-    echo "                             sentido horário."
-    echo "                             'id' omitido = roda o primeiro monitor ligado."
-    exit 0
 }
 
 # Mostra os IDs do monitores conectados
@@ -73,18 +52,13 @@ cmd_id() {
 
 # Devolve a orientação do monitor passado como parâmetro ou do primeiro monitor.
 cmd_orientation() {
-    local monitor_id="${1}"
-    if [[ -z "$monitor_id" ]]; then
-        monitor_id=$(get_first_connected_monitor_id)
-    fi
-    if [[ -z "$monitor_id" ]]; then
-        "Erro: Nenhum monitor encontrado"
-        return 1
-    fi
+    local monitor_id="${1:-}" orientation
+    [[ -z "$monitor_id" ]] && monitor_id=$(get_first_connected_monitor_id)
+    [[ -z "$monitor_id" ]] && { log_warn "Nenhum monitor encontrado"; return 1; }
 
     # shellcheck disable=SC2155
-    local orientation=$(get_monitor_orientation "$monitor_id")
-    if [[ -z "$orientation" ]]; then orientation="desconhecida"; fi
+    orientation=$(get_monitor_orientation "$monitor_id")
+    [[ -z "$orientation" ]] && orientation="desconhecida"
     echo "Orientação:"
     echo "  $monitor_id: $orientation"
     return 0
@@ -92,16 +66,11 @@ cmd_orientation() {
 
 # Roda o monitor indicado ou o primeiro monitor, para a orientação indicada ou 90º no sentido horário.
 cmd_rotate() {
-    local monitor_id="${1}" req_orientation="${2}"
+    local req_orientation="${1:-}" monitor_id="${2:-}"
 
-    if [[ -z "$monitor_id" ]]; then
-        monitor_id=$(get_first_connected_monitor_id)
-    fi
-    if [[ -z "$monitor_id" ]]; then
-        "Erro: Nenhum monitor encontrado"
-        return 1
-    fi
-    
+    [[ -z "$monitor_id" ]] && monitor_id=$(get_first_connected_monitor_id)
+    [[ -z "$monitor_id" ]] && log_critical "Nenhum monitor encontrado"
+
     # shellcheck disable=SC2155
     local orientation=$(get_monitor_orientation "$monitor_id") final_orientation=""
 
@@ -118,9 +87,7 @@ cmd_rotate() {
                 final_orientation="$req_orientation"
             ;;
             *)
-                echo "Erro: Orientação inválida '$req_orientation'."
-                echo "Orientação possíveis: normal right inverted left"
-                return 1
+                log_critical "Orientação inválida '$req_orientation'. Orientação possíveis: normal right inverted left"
             ;;
         esac
     fi
@@ -134,10 +101,7 @@ cmd_mirror() {
     # Executa o comando xrandr e filtra os nomes dos monitores conectados
     local minres="" res curr_hor min_hor cmd current_sink hdmi_sink analog_sink
     local monitor monitors=($(xrandr | grep ' connected' | awk '{print $1}'))
-    if [[ ${#monitors[@]} -lt 2 ]]; then
-	    echo "O sistema só tem um monitor"
-	    return 0
-    fi
+    [[ ${#monitors[@]} -lt 2 ]] && { echo "O sistema só tem um monitor"; return 0; }
     # encontrar a menor resolução (horizontal)
     for monitor in "${monitors[@]}"; do
         # obter a resolução do monitor
@@ -172,6 +136,24 @@ cmd_mirror() {
         analog_sink=$(pactl list short sinks | grep -i "analog" | awk '{print $2}' | head -n 1)
         [[ -n "$analog_sink" && "$current_sink" != "$analog_sink" ]] && change_audio_output "$analog_sink" "saĩda analógica"
     fi
+}
+
+# Mostra o texto de ajuda
+usage() {
+    echo "Uso: $(basename "$0") help | id | orientation [id] | rotate [orientation] [id]"
+    echo "Controlar a orientação do(s) monitor(es)"
+    echo "Comandos:"
+    echo "  help                       Mostra este texto de ajuda."
+    echo "  id                         Lista o ID dos monitores ligados."
+    echo "  mirror                     Coloca os ecrãs em 'mirror'."
+    echo "  orientation [id]           Apresenta a orientação do monitor 'id'."
+    echo "                             Se omitido mostra a orientação do monitor atual."
+    echo "  rotate [orientation] [id]  Roda o monitor 'id' para a orientação orientation."
+    echo "                             Orientações possíveis: normal right inverted left"
+    echo "                             'orientation' omitido = roda o monitor 90 graus no"
+    echo "                             sentido horário."
+    echo "                             'id' omitido = roda o primeiro monitor ligado."
+    exit 0
 }
 
 main() {

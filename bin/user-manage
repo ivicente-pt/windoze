@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# user-manage v1.1 - 2026-03-24
+# user-manage v1.1 - 2026-04-07
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
@@ -14,15 +14,17 @@ WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 user_kill() {
     local user="${1:-}"
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    pkill -u "$user" >/dev/null 2>&1
+    pkill -u "$user" >/dev/null 2>&1 || true
     sleep 1
-    pkill -9 -u "$user" >/dev/null 2>&1
+    pkill -9 -u "$user" >/dev/null 2>&1 || true
     sleep 1
 }
 
 # Ativa o serviço de reposição do aluno no boot
 ativar_limpa_aluno() {
-    local serv="limpar-aluno.service" path="$AEVH_CONF/systemd/$serv" dst="/etc/systemd/system/"
+    local serv path
+    serv="limpar-aluno.service"
+    path="$AEVH_CONF/systemd/$serv" dst="/etc/systemd/system/"
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
     [[ ! -f "$path" ]] && { log_error "Serviço não encontrado: $path"; return 1; }
     copy_check "$path" "$dst" || { log_error "Erro a copiar o ficheiro do serviço"; return 1; }
@@ -37,7 +39,9 @@ ativar_limpa_aluno() {
 
 # Desativa o serviço de reposição do aluno
 desativar_limpa_aluno() {
-    local serv="limpar-aluno.service" path="/etc/systemd/system/$serv"
+    local serv path
+    serv="limpar-aluno.service"
+    path="/etc/systemd/system/$serv"
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()" 
     systemctl stop "$serv" 2>/dev/null
     if systemctl disable "$serv"; then
@@ -175,23 +179,27 @@ user_restore_fast() {
 }
 # Repõe a pasta home do user $1
 user_restore() {
-    local user="${1:-}" winefile homedir    
+    local user="${1:-}" winefile homedir fast="${2:-}"
     [[ -z "$user" ]] && return 1
     log_info "A repor o perfil do $user"
     winefile="$AEVH_DATA/user/wine.tgz"
     homedir=$(get_home "$user")
-    tar xzf "$winefile" -C "$homedir" || log_error "Não consegui descomprimir os ficheiros do Wine."
+    user_restore_fast "$user"
+    chown -R "$user":"$user" "$homedir"
+    if [[ -z "$fast" ]]; then
+        tar xzf "$winefile" -C "$homedir" || log_error "Não consegui descomprimir os ficheiros do Wine."
+    fi
     chown -R "$user":"$user" "$homedir"
 }
 
 # Apaga e volta a criar o user $1
 user_reset() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}(): $*" 
-    local user="${1:-}"
+    local user="${1:-}" fast="${2:-}"
     [[ -z "$user" ]] && { log_warn "user_reset(): Não foi indicado o utilizador"; return 1; } 
     user_del "$user" || { log_warn "user_reset(): Não consegui eliminar $user"; return 1; }
     user_add "$user" || { log_warn "user_reset(): Não consegui adicionar $user"; return 1; }
-    user_restore "$user"
+    user_restore "$user" "$fast"
 }
 
 # Definir temas visuais do $user

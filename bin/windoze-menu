@@ -14,31 +14,30 @@ other_ops() {
     local opt
     log_info "Menu de operações e teste."
     while true; do
-		if ! opt=$(dialog --title "Operações individuais e de teste" --menu "Escolher a operação" 0 0 0 \
-			"1" "Verificar proxy-cache de apt" \
-			"2" "Teste de notificações (notify-all)" \
-			"3" "Definir o hostname" \
-			"4" "Monitores em espelho (mirror)" \
-			"5" "Teste de shutdown-notify" \
-			"6" "Executar o shutdown spread" \
-			"7" "Limpeza de sistema" \
-			"0" "Voltar" 3>&1 1>&2 2>&3); then
+		if ! opt=$(ui_select_option "Operações individuais e de teste" "Escolher a operação" \
+			"Verificar proxy-cache de apt" \
+			"Teste de notificações (notify-all)" \
+			"Definir o hostname" \
+			"Monitores em espelho (mirror)" \
+			"Teste de shutdown-notify" \
+			"Executar o shutdown spread" \
+			"Limpeza de sistema" \
+			"Voltar"); then
             return 0
         fi
         case $opt in
-            "1") clear; "$AEVH_BIN"/auto-apt-proxy ;;
+            "1") "$AEVH_BIN"/auto-apt-proxy ;;
             "2")
-                clear
                 log_info "A testar notificação"
                 apt_install libnotify-bin 
                 "$AEVH_BIN"/notify-all teste
             ;;
-            "3") clear; "$AEVH_BIN"/set-hostname ;;
-            "4") clear; "$AEVH_BIN"/monitor-ctrl mirror ;;
-            "5") clear; "$AEVH_BIN"/shutdown-notify ;;
-            "6") clear; "$AEVH_BIN"/shutdown-spread ;;
-            "7") clear; "$WINDOZE" clean ;;
-            "0") return 0 ;;
+            "3") "$AEVH_BIN"/set-hostname ;;
+            "4") "$AEVH_BIN"/monitor-ctrl mirror ;;
+            "5") "$AEVH_BIN"/shutdown-notify ;;
+            "6") "$AEVH_BIN"/shutdown-spread ;;
+            "7") "$WINDOZE" clean ;;
+            "8") return 0 ;;
         esac
         keywait
 	done
@@ -49,26 +48,26 @@ installations() {
     local opt
     log_info "Menu de instalações."
     while true; do
-        if ! opt=$(dialog --title "Instalações" --menu "Escolher a operação" 0 0 0 \
-            "A" "Instalação base (essencial)" \
-            "B" "Interface gráfica (GUI)" \
-            "C" "Crontab (tarefas agendadas)" \
-            "D" "OCS Inventory Agent" \
-            "E" "Temas visuais" \
-            "F" "Browsers (Firefox, Google Chrome)" \
-            "G" "Office (LibreOffice, OnlyOffice)" \
-            "0" "Voltar" 3>&1 1>&2 2>&3); then
+        if ! opt=$(ui_select_option "Instalações" "Escolher a operação" \
+            "Instalação base (essencial)" \
+            "Interface gráfica (GUI)" \
+            "Crontab (tarefas agendadas)" \
+            "OCS Inventory Agent" \
+            "Temas visuais" \
+            "Browsers (Firefox, Google Chrome)" \
+            "Office (LibreOffice, OnlyOffice)" \
+            "Voltar"); then
             return 0
         fi
 		case $opt in
-	    	"A") clear; "$WINDOZE" install base ;;
-            "B") clear; "$WINDOZE" install gui ;;
-            "C") clear; "$WINDOZE" install crontab ;;
-            "D") clear; "$WINDOZE" install ocs ;;
-            "E") clear; "$WINDOZE" install themes ;;
-            "F") clear; "$WINDOZE" install browsers ;;
-            "G") clear; "$WINDOZE" install office ;;
-            "0") return 0 ;;
+	    	"1") clear; "$WINDOZE" install base ;;
+            "2") clear; "$WINDOZE" install gui ;;
+            "3") clear; "$WINDOZE" install crontab ;;
+            "4") clear; "$WINDOZE" install ocs ;;
+            "5") clear; "$WINDOZE" install themes ;;
+            "6") clear; "$WINDOZE" install browsers ;;
+            "7") clear; "$WINDOZE" install office ;;
+            "8") return 0 ;;
         esac
         keywait
     done
@@ -79,16 +78,14 @@ uninstallations() {
     local opt
     log_info "Menu de desinstalações."
     while true; do
-    	if ! opt=$(dialog --title "Desinstalações" --menu "Escolher componente a remover" 0 0 0 \
-            "1" "Interface gráfica" \
-            "2" "Crontab" \
-            "3" "OCS Agent" \
-            "4" "Temas" \
-            "5" "Splash screen" \
-            "6" "YSoft Client" \
-            "7" "Google Chrome" \
-            "8" "OnlyOffice" \
-            "0" "Voltar" 3>&1 1>&2 2>&3); then
+    	if ! opt=$(ui_select_option "Desinstalações" "Escolher componente a remover" \
+            "Interface gráfica" \
+            "Crontab" \
+            "OCS Agent" \
+            "Temas" \
+            "Browsers" \
+            "Office" \
+            "Voltar"); then
             return 0
         fi
 		case $opt in
@@ -96,11 +93,9 @@ uninstallations() {
             "2") "$WINDOZE" remove crontab ;;
             "3") "$WINDOZE" remove ocs ;;
             "4") "$WINDOZE" remove themes ;;
-            "5") "$WINDOZE" remove splash ;;
-            "6") "$WINDOZE" remove ysoft ;;
-            "7") "$WINDOZE" remove chrome ;;
-            "8") "$WINDOZE" remove onlyoffice ;;
-            "0") return 0 ;;
+            "5") "$WINDOZE" remove browsers ;;
+            "6") "$WINDOZE" remove office ;;
+            "7") return 0 ;;
         esac
         keywait
     done
@@ -111,35 +106,32 @@ main () {
     get_root "$@"
     PATH="$PATH:$AEVH_BIN"
     WINDOZE="$AEVH_BIN/windoze"
-    apt_install dialog
+    #apt_install dialog
     log_info "Bem vindo ao sistema de gestão."
     while true; do
-        clear
-        if ! opt=$(dialog --title "AEVH Windoze" --menu "Gestão principal" 0 0 0 \
-            "1" "Atualizar sistema" \
-            "2" "Instalar componentes..." \
-            "3" "Remover componentes..." \
-            "4" "Gerir perfil da máquina..." \
-            "5" "Gerir utilizadores..." \
-            "6" "Outras operações / Testes..." \
-            "0" "Sair" 3>&1 1>&2 2>&3); then return 0
+        if ! opt=$(ui_select_option "AEVH Windoze" "Gestão principal" \
+            "Atualizar sistema" \
+            "Instalar componentes..." \
+            "Remover componentes..." \
+            "Gerir perfil da máquina..." \
+            "Gerir utilizadores..." \
+            "Outras operações / Testes..." \
+            "Sair"); then return 0
         fi
         case $opt in
             "1")
-                clear
                 log_info "A atualizar e corrigir o sistema"
                 apt_update
                 apt_upgrade
                 apt_fix
                 log_info "Atualização concluída"
-                keywait
             ;;
             "2") installations ;;                                   
             "3") uninstallations ;;                                  
             "4") "$AEVH_BIN"/profile-menu ;;
             "5") "$AEVH_BIN"/user-menu ;;                       
             "6") other_ops ;;
-            "0") return 0 ;;
+            "7") return 0 ;;
         esac
     done
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# auto-apt-proxy v1.1 - 2026-03-24
+# auto-apt-proxy v1.1 - 2026-04-07
 # Definir o proxy para usar com o apt, se estiver disponível
 
 # Nota:
@@ -20,7 +20,7 @@ main() {
 	local ip port proxy proxyconf="/etc/apt/apt.conf.d/02-apt-proxy.conf"
 
 	log_info "A procurar um proxy APT disponível..."
-	for proxy in "${APT_PROXIES[@]}"; do
+	for proxy in "${APT_PROXIES[@]:-}"; do
 		ip="${proxy%%:*}"
 		port="${proxy##*:}"
 		if test_port "$ip" "$port"; then
@@ -28,6 +28,7 @@ main() {
 				echo "Acquire::http::Proxy \"http://$ip:$port\";"
 				echo "Acquire::https::Proxy \"http://$ip:$port\";"
 			} > "$proxyconf"
+			chmod 644 "$proxyconf"
 			log_bye "Proxy configurado com sucesso: $ip:$port"
 		fi
 		log_info "Proxy $ip:$port não respondeu"

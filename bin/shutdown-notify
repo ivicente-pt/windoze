@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shutdown-notify v1.1 - 2026-03-24
+# shutdown-notify v1.1.1 - 2026-04-07
 
 # Verifica se há um encerramento a decorrer. Se faltar um múltiplo de 5 ou menos de 5 minutos
 # para o encerramento, notifica o utilizador, dando a opção de cancelar o encerramento em curso.
@@ -16,7 +16,9 @@ WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 
 main() {
     local shutfile="/run/systemd/shutdown/scheduled"
-    local target_sec now_sec diff_sec min usec force_notify="${1:-}" aviso btn_ok btn_cancel ans out
+    local target_sec now_sec diff_sec min usec force_notify="${1:-}"
+    local btn_ok="ok" btn_cancel="cancel" ans out aviso user_name user_id
+    local notify_all="${AEVH_BIN}/notify-all"
     [[ ! -f "$shutfile" ]] && exit 0
     usec=$(grep -Po '^USEC=\K[0-9]+' "$shutfile" || true)
     [[ -z "$usec" ]] && exit 0
@@ -27,24 +29,34 @@ main() {
 
     [[ "$diff_sec" -lt 0 ]] && exit 0
     min=$((diff_sec / 60))
-    if [[ -n "$force_notify" || "$min" -lt 5 || $((min % 5)) -eq 0 ]]; then
+    if [[ -n "$force_notify" || "$min" -le 5 || $((min % 5)) -eq 0 ]]; then
+        user_name=$(who | awk '{print $1}' | head -n1)
+        [[ -z "$user_name" ]] && { log_error "Nenhum utilizador gráfico detetado."; exit 0; }
+        user_id=$(id -u "$user_name")
+        
         aviso="O sistema vai encerrar dentro de $min minutos!"
-        btn_ok="Ok, continuar com o encerramento"
-        btn_cancel="Cancelar encerramento"
-        log_info "$aviso"
-        ans=$(notify -w -u critical -A "$btn_ok" -A "$btn_cancel" "Atenção: $aviso")
+        log_info "Notificando $user_name: $aviso"
 
-        [[ -z "$ans" ]] && log_bye "User -> Sem resposta (timeout)."
-        [[ "$ans" == "0" || "$ans" == "$btn_ok" ]] && log_bye "User -> Escolheu prosseguir com o encerramento."
+        ans=$(sudo -u "$user_name" \
+              DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_id/bus" \
+              notify-send -w -u critical \
+              -A "$btn_ok=Ok, continuar" \
+              -A "$btn_cancel=Cancelar encerramento" \
+              "Atenção" "$aviso")
 
-        log_info "Utilizador solicitou cancelamento do encerramento."
-        if out=$(/usr/sbin/shutdown -c 2>&1); then
-            notify "Informação:" "Encerramento cancelado com sucesso."
-            log_info "Encerramento cancelado."
-        else
-            notify "Atenção:" "Não foi possível cancelar o encerramento!"
-            log_error "Falha ao cancelar encerramento: $out"
-        fi
+        case "$ans" in
+            "$btn_cancel")
+                log_info "Utilizador $user_name solicitou cancelamento."
+                if out=$(/usr/sbin/shutdown -c 2>&1); then
+                    [[ -x "$notify_all" ]] && "$notify_all" "Informação: Encerramento cancelado por $user_name."
+                    log_info "Encerramento cancelado com sucesso."
+                else
+                    log_error "Falha ao cancelar: $out"
+                fi
+                ;;
+            "$btn_ok") log_info "User escolheu prosseguir." ;;
+            *) log_info "Notificação fechada ou ignorada (Ação: $ans)." ;;
+        esac
     fi
 }
 

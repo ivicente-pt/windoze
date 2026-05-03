@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# set-hostname v1.1 - 2026-03-24
+# set-hostname v1.1 - 2026-04-07
 # Altera o hostname da máquina de forma interativa
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
-[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
-[[ "$AEVH_LIB_LOADED" != "1" ]] && { echo "Falha a carregar lib AEVH"; exit 1; }
+[[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB" || true
+[[ "${AEVH_LIB_LOADED:-0}" != "1" ]] && { echo "Falha a carregar $AEVH_LIB" >&2 ; exit 1; }
 
 WINDOZE_CONF="/opt/aevh/conf/windoze.conf"
 [[ -f "$WINDOZE_CONF" ]] && source "$WINDOZE_CONF" || { echo "Falha a carregar $WINDOZE_CONF"; exit 1; }
 
 main() {
     get_root "$@"
-    apt_install dialog
     local ans title="Configuração de Hostname" question="Indique o novo hostname desta máquina:" current
     current=$(trim "$(< /etc/hostname)")
 
     # Loop principal
     while true; do
-        if ! ans=$(dialog --title "$title" --inputbox "$question" 10 50 "$current" 2>&1 >/dev/tty); then
+        if ! ans=$(ui_get_input "$title" "$question" "$current"); then
             log_bye "Alteração cancelada."
         fi
         ans=$(trim "$ans")
         if ! is_valid_hostname "$ans"; then
-            dialog --title "Erro" --msgbox "O hostname '$ans' é inválido.\nUse apenas letras, números e hífenes." 0 0
+            ui_show_msg "Erro" "O hostname '$ans' é inválido.\nUse apenas letras, números e hífenes." 0 0
             question="Hostname inválido. Tente de novo:"
             continue
         fi

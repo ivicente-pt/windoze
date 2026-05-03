@@ -1,0 +1,26 @@
+#!/bin/bash
+# Instalar o Windoze
+# v1.5.1 2026-04-05
+
+# wget --no-check-certificate tinyurl.com/aevh-windowze-install
+
+get_distro() { grep ^VERSION_CODENAME /etc/os-release | cut -d'=' -f2; }
+error() { echo "[ERRO] $*"; exit 1; }
+
+main() {
+    local distro src="windoze.tgz" dst="/opt" url="https://tinyurl.com/aevh-windoze"
+    distro="$(get_distro)"
+    [[ "$distro" != "bookworm" && "$distro" != "trixie" ]] && error "Distribuição não suportada: $distro"
+    echo "Sistema Debian detetado."
+    [[ "$EUID" -ne 0 ]] && error "É preciso executar com privilégios de root"
+    if [[ ! -f "$src" ]]; then
+        wget --no-check-certificate "$url" -O "$src"
+        [[ ! -f "$src" ]] && error "Não consigo transferir $url"
+    fi
+    mkdir -p "$dst"
+    tar -xf "$src" -C "$dst" --checkpoint=.1000
+    [[ ! -f "/opt/aevh/bin/windoze" ]] && error "Algo correu mal"
+    /opt/aevh/bin/windoze full
+}
+
+main "$@"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# user-menu v1.1 - 2026-03-24
+# user-menu v1.1 - 2026-04-07
 
 AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 [[ -f "$AEVH_LIB" ]] && source "$AEVH_LIB"
@@ -19,17 +19,17 @@ run_user_action() {
     
     case "$action" in
         reset)
-            if confirm "$MSG_CONFIRM" "Atenção: Reset $user"; then
+            if ui_confirm_action "Reset $user" "$MSG_CONFIRM"; then
                 "$MANAGE" reset "$user"
                 usermod -c "$label" "$user"
-                dialog --title "Sucesso" --msgbox "O utilizador $user foi reposto." 6 45
+                ui_show_msg "Sucesso" "O utilizador $user foi reposto."
             else
                 log_info "Reset de $user cancelado pelo administrador."
             fi
             ;;
         save)
             "$MANAGE" save "$user"
-            dialog --title "Sucesso" --msgbox "Perfil de $user guardado com sucesso." 6 45
+            ui_show_msg "Sucesso" "Perfil de $user guardado com sucesso."
             ;;
     esac
 }
@@ -38,12 +38,21 @@ main() {
     get_root "$@"
     local opt
     while true; do
-        if ! opt=$(dialog --title "$TITLE" --menu "Escolha a ação para os perfis locais:" 15 55 5 \
-            1 "Reset do aluno" \
-            2 "Salvar o perfil do aluno" \
-            3 "Reset do professor" \
-            4 "Salvar o perfil do professor" \
-            0 "Sair" 3>&1 1>&2 2>&3); then
+#        if ! opt=$(dialog --title "$TITLE" --menu "Escolha a ação para os perfis locais:" 15 55 5 \
+#            1 "Reset do aluno" \
+#            2 "Salvar o perfil do aluno" \
+#            3 "Reset do professor" \
+#            4 "Salvar o perfil do professor" \
+#            0 "Sair" 3>&1 1>&2 2>&3); then
+#            log_bye "Menu encerrado"
+#        fi
+
+        if ! opt=$(ui_select_option "$TITLE" "Escolha a ação para os perfis locais:" \
+            "Reset do aluno" \
+            "Salvar o perfil do aluno" \
+            "Reset do professor" \
+            "Salvar o perfil do professor" \
+            "Sair"); then
             log_bye "Menu encerrado"
         fi
 
@@ -52,7 +61,7 @@ main() {
             2) run_user_action save aluno "" ;;
             3) run_user_action reset professor "Professor" ;;
             4) run_user_action save professor "" ;;
-            0) log_bye "Saída selecionada." ;;
+            5) log_bye "Saída selecionada." ;;
         esac
     done
 }
