@@ -188,7 +188,7 @@ setup_lexend() {
 install_gui() {
     [[ $DEBUG -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     log_info "A instalar a interface gráfica"
-    local pkg lexend lexend_dir="/usr/local/share/fonts/lexend"
+    local pkg
     is_debian12 && pkg=( libgl1-mesa-glx )
     is_debian13 && pkg=( libgl1 libglx-mesa0 libegl1 )
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
