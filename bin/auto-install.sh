@@ -47,6 +47,6 @@ install_aevh_lib() {
     rm -rf /tmp/aevh
 }
 
-install_windoze
 install_aevh_lib
-"$TARGET"/bin/windoze full
+install_windoze
+#"$TARGET"/bin/windoze full
