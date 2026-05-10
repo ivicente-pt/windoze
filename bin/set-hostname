@@ -33,7 +33,7 @@ main() {
             sed -i "s/\b${safe_current}\b/${ans}/g" /etc/hosts
         fi
         echo "$ans" > /etc/hostname 
-        if command -v hostnamectl >/dev/null; then
+        if is_installed hostnamectl; then
             hostnamectl set-hostname "$ans"
         else
             hostname "$ans"

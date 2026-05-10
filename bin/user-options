@@ -96,7 +96,7 @@ EOF
 }
 
 setup_flatpak() {
-    if command -v flatpak > /dev/null; then
+    if is_installed flatpak; then
         flatpak override --user --filesystem=/media:rw || true
         flatpak override --user --filesystem=/run/media/$USER:rw || true
         flatpak override --user --filesystem=/run/media:ro || true
@@ -113,11 +113,10 @@ setup_options() {
 main() {
     is_root && log_critical "Este script não deve ser executado como root nem com sudo!"
     [[ -f "$DONE_FILE" ]] && exit 0
-    # Verificação de integridade antes de lançar para background
-    if command -v winetricks >/dev/null 2>&1; then
+    if is_installed winetricks; then
         winetricks -q corefonts vcrun2015 &
     else
-        log_warn "winetricks não detetado. Bibliotecas ignoradas."
+        log_warn "winetricks não detetado."
     fi
     setup_options &
     setup_flatpak &

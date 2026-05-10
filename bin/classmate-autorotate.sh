@@ -1,14 +1,15 @@
 #!/bin/bash
 
 MONITOR="DSI-1"
-#TOUCH="Goodix Capacitive TouchScreen id=14"
-TOUCH=14
-USER=$(who | cut -d' ' -f1 | sort | uniq | head -n1)
+TOUCH="Goodix Capacitive TouchScreen"
+#TOUCH=14
+USER_NAME=$(loginctl list-users --no-legend | awk '{print $2}' | head -n1)
+[[ -z "$USER_NAME" ]] && USER_NAME=$(who | cut -d' ' -f1 | head -n1)
 export DISPLAY=:0
-export XAUTHORITY=/home/$USER/.Xauthority
+export XAUTHORITY=/home/$USER_NAME/.Xauthority
 
 rotate() {
-    sleep 1
+    sleep 0.5
     case "$1" in
         normal)
             xrandr --output "$MONITOR" --rotate inverted
@@ -30,10 +31,8 @@ rotate() {
     sleep 1
 }
 
-monitor-sensor | while read -r line; do
-    if [[ $line == *"orientation changed"* ]]; then
-        DIRECTION=$(echo $line | awk '{print $NF}')
-        rotate "$DIRECTION"
-    fi
+monitor-sensor | stdbuf -oL grep --line-buffered "orientation changed" | while read -r line; do
+    DIRECTION="${line##* }"
+    rotate "$DIRECTION"
 done
 
