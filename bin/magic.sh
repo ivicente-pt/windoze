@@ -11,7 +11,7 @@ AEVH_LIB="/opt/aevh/lib/aevh-lib.sh"
 auto_optimize_preload() {
     [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local override_dir="/etc/systemd/system/preload.service.d" disk_type
-    disk_type=$(get_disk_type /) || true
+    disk_type=$(get_disk_type) || true
     if [[ "$disk_type" == "HDD" ]]; then 
         apt_install preload
         mkdir -p "$override_dir"
@@ -81,7 +81,7 @@ EOF
 auto_optimize_init() {
     [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
 #    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
-    update-initramfs -u >/dev/null 2>&1
+#    update-initramfs -u >/dev/null 2>&1
 }
 
 auto_optimize() {
@@ -100,8 +100,9 @@ auto_optimize() {
 }
 
 add_grub_params() {
+    [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    (( $# < 2 )) && return 0 
     local conf_file="${1:-}" params="${*:2}"
-    [[ -z "$conf_file" || -z "$params" ]] && return 0
     if [[ -f "$conf_file" ]] && grep -qF "$params" "$conf_file"; then
         return 0
     fi
@@ -111,6 +112,7 @@ add_grub_params() {
 }
 
 auto_hp7800() {
+    [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local conf_file="/etc/default/grub.d/98-hp7800-fix.cfg" e1000="$AEVH_BIN/auto-patch-e1000.sh"
     # lax para sensores, disable pstate para usar o driver legacy melhorado
     [[ -f "$e1000" ]] && "$e1000"
@@ -119,6 +121,7 @@ auto_hp7800() {
 }
 
 setup_autorotate_service() {
+    [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local service_file="/etc/systemd/system/autorotate.service"
 
     cat <<EOF > "$service_file"
@@ -129,7 +132,7 @@ Wants=iio-sensor-proxy.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/autorotate.sh
+ExecStart=/opt/aevh/bin/classmate-autorotate.sh
 Restart=always
 RestartSec=5
 User=root
@@ -144,7 +147,8 @@ EOF
 }
 
 auto_classmate() {
-    apt_install iio-sensor-proxy
+    [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+    apt_install iio-sensor-proxy || true
     setup_autorotate_service
     local ldm_conf="/etc/lightdm/lightdm.conf.d/99-classmate-rotation.conf"
     local script_path="$AEVH_BIN/classmate-monitor-normal.sh"
@@ -163,6 +167,7 @@ EOF
 }
 
 auto_magic() {
+    [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     auto_optimize
     if is_hp7800; then
         log_info "Detetado HP 7800"
@@ -179,7 +184,8 @@ usage() {
 }
 
 main() {
-    get_root
+    apt_update
+    apt_upgrade
     local opt="${1:-}"
     opt="${opt,,}"
     case "$opt" in
@@ -190,4 +196,5 @@ main() {
     esac
 }
 
+need_root
 main "$@"
