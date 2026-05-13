@@ -121,12 +121,14 @@ main() {
     setup_options &
     setup_flatpak &
     sleep 8
-    setup_xfce4_options
-    sleep 1
-    setup_xfce4_panel
-    sleep 1
-    setup_xfce4_session
-    sleep 1
+    if is_xfce; then
+        setup_xfce4_options
+        sleep 1
+        setup_xfce4_panel
+        sleep 1
+        setup_xfce4_session
+        sleep 1
+    fi
     mkdir -p "$(dirname "$DONE_FILE")"
     touch "$DONE_FILE"
     log_info "Configuração de utilizador concluída com sucesso: $USER"

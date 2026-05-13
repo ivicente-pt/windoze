@@ -80,8 +80,7 @@ op_user() {
 # Uso: desktop_icons "aluno" "org.gimp.GIMP" "org.audacityteam.Audacity"
 desktop_icons() {
     local user="${1:-}"
-    shift
-    local id ids=("$@") user_desktop source
+    local id ids=("$@:2") user_desktop source
     user_desktop=$(getent passwd "$user" | cut -d: -f6)"/Área de Trabalho"
 
     # Se a pasta não existir (ex: sistema em inglês), tenta "Desktop"

@@ -80,8 +80,8 @@ EOF
 
 auto_optimize_init() {
     [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
-#    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
-#    update-initramfs -u >/dev/null 2>&1
+    sed -i 's/^[# ]*MODULES=.*/MODULES=dep/' "/etc/initramfs-tools/initramfs.conf"
+    update-initramfs -u >/dev/null 2>&1
 }
 
 auto_optimize() {
@@ -94,7 +94,7 @@ auto_optimize() {
     auto_optimize_picom
     auto_optimize_zram
     auto_optimize_logs
-    auto_optimize_init
+#    auto_optimize_init
     apt_cmd autopurge
     log_info "Serviços otimizados"
 }
@@ -114,8 +114,8 @@ add_grub_params() {
 auto_hp7800() {
     [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
     local conf_file="/etc/default/grub.d/98-hp7800-fix.cfg" e1000="$AEVH_BIN/auto-patch-e1000.sh"
-    # lax para sensores, disable pstate para usar o driver legacy melhorado
     [[ -f "$e1000" ]] && "$e1000"
+    # lax para sensores, disable pstate para usar o driver legacy melhorado
     local params="acpi_enforce_resources=lax intel_pstate=disable video=SVIDEO-1:d"
     add_grub_params "$conf_file" "$params"
 }
@@ -148,6 +148,13 @@ EOF
 
 auto_classmate() {
     [[ ${DEBUG:-0} -eq 1 ]] && log_info "${FUNCNAME[1]}() -> ${FUNCNAME[0]}()"
+
+    local conf_file="/etc/default/grub.d/99-braswell-fix.cfg"
+    local params="intel_idle.max_cstate=1 i915.enable_dc=0 i915.enable_rc6=0"
+    add_grub_params "$conf_file" "$params"
+
+    is_gnome && return 0
+
     apt_install iio-sensor-proxy || true
     setup_autorotate_service
     local ldm_conf="/etc/lightdm/lightdm.conf.d/99-classmate-rotation.conf"
@@ -159,11 +166,7 @@ auto_classmate() {
 [Seat:*]
 display-setup-script=$script_path
 EOF
-    fi
-    
-    local conf_file="/etc/default/grub.d/99-braswell-fix.cfg"
-    local params="intel_idle.max_cstate=1 i915.enable_dc=0 i915.enable_rc6=0"
-    add_grub_params "$conf_file" "$params"
+    fi  
 }
 
 auto_magic() {
@@ -184,6 +187,7 @@ usage() {
 }
 
 main() {
+    get_root "$@"
     apt_update
     apt_upgrade
     local opt="${1:-}"
@@ -196,5 +200,4 @@ main() {
     esac
 }
 
-need_root
 main "$@"
