@@ -166,6 +166,7 @@ user_restore_fast() {
     mother=$(dirname "$homedir")
     mkdir -p "$mother"
     user_kill "$user"
+    sleep 2
     rm -rf "$homedir"
     tar xzf "$infile" -C "$mother" || { log_error "Não consegui descomprimir $infile"; return 1; }
     chown -R "$user":"$user" "$homedir"
@@ -174,7 +175,7 @@ user_restore_fast() {
     copy_check "$AEVH_DATA/desktop/monitor-mirror.desktop" "$autostart/"
     copy_check "$AEVH_DATA/desktop/user-options.desktop" "$autostart/"
     copy_check "$AEVH_DATA/desktop/Picom.desktop" "$autostart/"
-    set_xfce_session "$user"
+    is_xfce && set_xfce_session "$user"
     log_info "Utilizador $user restaurado"
 }
 # Repõe a pasta home do user $1

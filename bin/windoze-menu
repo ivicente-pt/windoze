@@ -56,18 +56,20 @@ installations() {
             "Temas visuais" \
             "Browsers (Firefox, Google Chrome)" \
             "Office (LibreOffice, OnlyOffice)" \
+            "Criar user para provas externas" \
             "Voltar"); then
             return 0
         fi
 		case $opt in
-	    	"1") clear; "$WINDOZE" install base ;;
-            "2") clear; "$WINDOZE" install gui ;;
-            "3") clear; "$WINDOZE" install crontab ;;
-            "4") clear; "$WINDOZE" install ocs ;;
-            "5") clear; "$WINDOZE" install themes ;;
-            "6") clear; "$WINDOZE" install browsers ;;
-            "7") clear; "$WINDOZE" install office ;;
-            "8") return 0 ;;
+	    	"1") "$WINDOZE" install base ;;
+            "2") "$WINDOZE" install gui ;;
+            "3") "$WINDOZE" install crontab ;;
+            "4") "$WINDOZE" install ocs ;;
+            "5") "$WINDOZE" install themes ;;
+            "6") "$WINDOZE" install browsers ;;
+            "7") "$WINDOZE" install office ;;
+            "8") setup_intuitivo ;; 
+            "9") return 0 ;;
         esac
         keywait
     done
@@ -85,6 +87,7 @@ uninstallations() {
             "Temas" \
             "Browsers" \
             "Office" \
+            "Utilizador das provas externas" \
             "Voltar"); then
             return 0
         fi
@@ -95,10 +98,48 @@ uninstallations() {
             "4") "$WINDOZE" remove themes ;;
             "5") "$WINDOZE" remove browsers ;;
             "6") "$WINDOZE" remove office ;;
-            "7") return 0 ;;
+            "7") del_intuitivo ;;
+            "8") return 0 ;;
         esac
         keywait
     done
+}
+
+setup_intuitivo() {
+    local apps="/opt/aevh/apps" autostart_script="/usr/local/bin/launch-provas.sh"
+    local config_dir="/home/intuitivo/.config/autostart"
+
+    useradd -m -c "Provas externas" -s /bin/bash intuitivo
+    echo "intuitivo:provas2026" | chpasswd
+
+    mkdir -p "$apps"
+    chmod "$apps"
+
+    cat << 'EOF' > $autostart_script
+#!/bin/bash
+#/opt/aevh/bin/classmate.sh
+"/opt/aevh/apps/Provas IAVE-0.0.12.AppImage"
+xfce4-session-logout --logout
+EOF
+    chmod +x $autostart_script
+    sudo -u intuitivo mkdir -p $config_dir
+    cat << EOF > $config_dir/provas-kiosk.desktop
+[Desktop Entry]
+Type=Application
+Exec=$autostart_script
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Kiosk Provas
+Comment=Inicia a AppImage de Provas e encerra a sessão ao sair
+EOF
+
+    chown intuitivo:intuitivo $config_dir/provas-kiosk.desktop
+}
+
+del_intuitivo() {
+    rm -f /usr/local/bin/launch-provas.sh
+    deluser --remove-home intuitivo
 }
 
 main () {

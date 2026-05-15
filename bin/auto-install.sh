@@ -47,6 +47,8 @@ install_aevh_lib() {
     rm -rf /tmp/aevh
 }
 
+sudo mkdir -p "$TARGET"
+sudo apt install curl
 install_aevh_lib
 install_windoze
 #"$TARGET"/bin/windoze full

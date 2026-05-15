@@ -27,3 +27,4 @@ logs/*
 static/
 build/
 archive/
+bin/.*_token
